@@ -8,6 +8,7 @@
 ass.json
 tm.json
 
-# Future generated course exports
+# Generated Canvas course data
 snapshots/
+comparisons/
 exports/
