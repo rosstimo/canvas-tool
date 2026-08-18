@@ -57,7 +57,7 @@ recon_sanitize() {
     find "$out" -maxdepth 1 -type f -name '*.json' ! -name manifest.json ! -name normalized.json -print0 |
     while IFS= read -r -d '' file; do
         jq 'walk(if type=="object" then
-          del(.access_code,.secure_params,.submissions_download_url,.speed_grader_url,
+          del(.access_code,.student_access_code,.verifier,.secure_params,.submissions_download_url,.speed_grader_url,
               .message_students_url,.quiz_submissions_url,.quiz_statistics_url,.quiz_reports_url,
               .quiz_submission_versions_html_url,.mobile_url,.preview_url,.thumbnail_url,
               .author,.user,.participants,.lockdown_browser_monitor_data,.ip_filter,.ics) |
@@ -72,6 +72,7 @@ recon_normalize() {
       --argjson course "$(cat "$out/course.json")" \
       --argjson settings "$(cat "$out/settings.json")" \
       --argjson tabs "$(cat "$out/tabs.json")" \
+      --argjson modules "$(cat "$out/modules.json")" \
       --argjson module_items "$(cat "$out/module-items.json")" \
       --argjson groups "$(cat "$out/assignment-groups.json")" \
       --argjson assignments "$(cat "$out/assignments.json")" \
@@ -125,7 +126,7 @@ canvas_recon() {
     captured="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
     jq -n --arg captured_at "$captured" --arg base_url "$CANVAS_COURSE_BASE_URL" --arg course_id "$id" \
       --arg course_name "$name" --arg course_code "$code" \
-      '{schema_version:1,captured_at:$captured_at,base_url:$base_url,course_id:$course_id,course_name:$course_name,course_code:$course_code,student_data_included:false}' >"$out/manifest.json"
+      '{schema_version:1,captured_at:$captured_at,base_url:$base_url,canonical_course_url:($base_url+"/courses/"+$course_id),course_id:$course_id,course_name:$course_name,course_code:$course_code,student_data_included:false}' >"$out/manifest.json"
 
     recon_get "$out" "$errors" settings "/api/v1/courses/$id/settings" single
     recon_get "$out" "$errors" tabs "/api/v1/courses/$id/tabs" collection
@@ -136,7 +137,7 @@ canvas_recon() {
     recon_get "$out" "$errors" classic-quizzes "/api/v1/courses/$id/quizzes" collection
     recon_expand "$out" "$errors" classic-quiz-questions "$out/classic-quizzes.json" '.[]|[.id,.title]' "/api/v1/courses/$id/quizzes/{id}/questions" collection group
     recon_get "$out" "$errors" new-quizzes "/api/quiz/v1/courses/$id/quizzes" collection
-    recon_expand "$out" "$errors" new-quiz-items "$out/new-quizzes.json" '.[]|[.id,.title]' "/api/quiz/v1/courses/$id/quizzes/{id}/items" collection group
+    recon_expand "$out" "$errors" new-quiz-items "$out/new-quizzes.json" '.[]|[(.assignment_id // .id),.title]' "/api/quiz/v1/courses/$id/quizzes/{id}/items" collection group
     recon_get "$out" "$errors" pages-index "/api/v1/courses/$id/pages" collection
     recon_expand "$out" "$errors" pages "$out/pages-index.json" '.[]|[.page_id,.title]' "/api/v1/courses/$id/pages/page_id:{id}" single flat
     recon_get "$out" "$errors" rubrics-index "/api/v1/courses/$id/rubrics" collection
@@ -152,7 +153,10 @@ canvas_recon() {
     recon_get "$out" "$errors" outcome-links "/api/v1/courses/$id/outcome_group_links?outcome_style=full&outcome_group_style=full" collection
     recon_get "$out" "$errors" calendar-events "/api/v1/calendar_events?context_codes[]=course_$id&all_events=true" collection
 
-    recon_sanitize "$out"; recon_normalize "$out"; recon_summary "$out"
+    recon_sanitize "$out"; recon_normalize "$out"
+    jq --argjson error_count "$(jq length "$errors")" '. + {error_count:$error_count, errors_file:"errors.json"}' "$out/manifest.json" >"$out/manifest.json.tmp"
+    mv "$out/manifest.json.tmp" "$out/manifest.json"
+    recon_summary "$out"
     printf '\nRecon written to %s\n' "$out" >&2; printf '%s\n' "$out"
 }
 
