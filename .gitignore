@@ -1,2 +1,13 @@
-*~
+# Local secrets
 .env
+
+# Editor backup files
+*~
+
+# Canvas API output / scratch data
+ass.json
+tm.json
+
+# Future generated course exports
+snapshots/
+exports/
