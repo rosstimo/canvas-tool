@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CANVAS_TOOLS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export CANVAS_TOOLS_ROOT
+
+source "$CANVAS_TOOLS_ROOT/lib/canvas-course.sh"
+source "$CANVAS_TOOLS_ROOT/lib/canvas-api.sh"
+source "$CANVAS_TOOLS_ROOT/lib/canvas-recon.sh"
+
+VERSION='0.1.0-dev'
+
+load_canvas_env() {
+    # shellcheck source=/dev/null
+    source "$CANVAS_TOOLS_ROOT/lib/canvas-env.sh"
+}
+
+usage() {
+    cat <<'USAGE'
+canvas-tool - Canvas LMS course inspection and recon
+
+Usage:
+  canvas-tool doctor <course-id-or-url>
+  canvas-tool inspect <course-id-or-url>
+  canvas-tool recon <course-id-or-url> [output-directory]
+  canvas-tool snapshot <course-id-or-url> [output-directory]
+  canvas-tool diff <course-a-id-or-url> <course-b-id-or-url>
+  canvas-tool api <METHOD> <path-or-url> [curl-options...]
+  canvas-tool version
+
+Examples:
+  canvas-tool doctor https://isu.instructure.com/courses/18637
+  canvas-tool inspect 18637
+  canvas-tool recon https://isu.instructure.com/courses/18637
+  canvas-tool diff 18000 18637
+  canvas-tool api GET /api/v1/courses/18637/assignment_groups
+
+The full course URL may be used anywhere a course target is accepted. A bare
+numeric ID uses CANVAS_BASE_URL from .env. Credentials are never sent to an
+origin other than the configured CANVAS_BASE_URL origin.
+USAGE
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'Error: required command not found: %s\n' "$1" >&2
+        return 1
+    }
+}
+
+command_doctor() {
+    local target="$1" course
+    load_canvas_env
+    require_command curl
+    require_command jq
+    require_command awk
+
+    canvas_resolve_course "$target"
+    course="$(canvas_api_request GET "/api/v1/courses/${CANVAS_COURSE_ID}?include[]=permissions&include[]=term")"
+
+    printf 'PASS configuration: %s\n' "$CANVAS_ENV_FILE"
+    printf 'PASS Canvas origin: %s\n' "$CANVAS_COURSE_BASE_URL"
+    printf 'PASS course ID: %s\n' "$CANVAS_COURSE_ID"
+    printf 'PASS API authentication and course access\n'
+    printf 'Course: %s (%s)\n' \
+        "$(jq -r '.name // "unnamed"' <<<"$course")" \
+        "$(jq -r '.course_code // "no course code"' <<<"$course")"
+}
+
+command_inspect() {
+    local target="$1" course
+    load_canvas_env
+    canvas_resolve_course "$target"
+    course="$(canvas_api_request GET "/api/v1/courses/${CANVAS_COURSE_ID}?include[]=permissions&include[]=term")"
+
+    jq '{
+      id,
+      name,
+      course_code,
+      sis_course_id,
+      workflow_state,
+      start_at,
+      end_at,
+      time_zone,
+      default_view,
+      apply_assignment_group_weights,
+      term,
+      permissions
+    }' <<<"$course"
+}
+
+command_api() {
+    local method="$1" target="$2"
+    load_canvas_env
+    shift 2
+    method="${method^^}"
+
+    case "$method" in
+        GET)
+            if (($# == 0)); then
+                canvas_api_request GET "$target" | jq .
+            else
+                canvas_api_request GET "$target" "$@" | jq .
+            fi
+            ;;
+        POST|PUT|PATCH|DELETE)
+            local response
+            response="$(canvas_api_request "$method" "$target" "$@")"
+            if jq -e . >/dev/null 2>&1 <<<"$response"; then
+                jq . <<<"$response"
+            else
+                printf '%s\n' "$response"
+            fi
+            ;;
+        *)
+            printf 'Error: unsupported method: %s\n' "$method" >&2
+            return 2
+            ;;
+    esac
+}
+
+main() {
+    local command="${1:-help}"
+    shift || true
+
+    case "$command" in
+        -h|--help|help)
+            usage
+            ;;
+        version|--version)
+            printf 'canvas-tool %s\n' "$VERSION"
+            ;;
+        doctor)
+            (($# == 1)) || { usage >&2; return 2; }
+            command_doctor "$1"
+            ;;
+        inspect)
+            (($# == 1)) || { usage >&2; return 2; }
+            command_inspect "$1"
+            ;;
+        recon|snapshot)
+            (($# >= 1 && $# <= 2)) || { usage >&2; return 2; }
+            load_canvas_env
+            canvas_recon "$@"
+            ;;
+        diff)
+            (($# == 2)) || { usage >&2; return 2; }
+            load_canvas_env
+            canvas_recon_diff "$1" "$2"
+            ;;
+        api)
+            (($# >= 2)) || { usage >&2; return 2; }
+            command_api "$@"
+            ;;
+        *)
+            printf 'Error: unknown command: %s\n\n' "$command" >&2
+            usage >&2
+            return 2
+            ;;
+    esac
+}
+
+main "$@"
