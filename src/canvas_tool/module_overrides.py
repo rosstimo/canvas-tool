@@ -52,10 +52,12 @@ def capture_module_overrides(client: CanvasClient, snapshot: Path) -> list[dict[
             continue
         module_id = str(module["id"])
         endpoint = f"/api/v1/courses/{course_id}/modules/{module_id}/assignment_overrides"
+        available = True
         try:
             raw = client.paginate(endpoint)
         except CanvasApiError:
             error_count += 1
+            available = False
             raw = []
         safe = [_safe_override(item) for item in raw if isinstance(item, dict)]
         override_count += len(safe)
@@ -63,6 +65,7 @@ def capture_module_overrides(client: CanvasClient, snapshot: Path) -> list[dict[
             "source_id": module_id,
             "title": str(module.get("name") or ""),
             "source_position": module.get("position"),
+            "available": available,
             "items": safe,
         })
 
