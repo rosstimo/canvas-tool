@@ -9,7 +9,8 @@ from typing import Any, Callable
 
 from .api import CanvasApiError, CanvasClient
 from .course import resolve_course
-from .normalize import normalize_snapshot, sanitize
+from .normalize import normalize_snapshot
+from .privacy import sanitize
 from .report_index import refresh_report_index
 
 
