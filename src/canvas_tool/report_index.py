@@ -8,9 +8,20 @@ from typing import Any
 _INDEX_LINK = "[← Report index](README.md)"
 _PRIORITY = {
     "course-overview.md": 0,
-    "course-audit.md": 1,
-    "date-audit.md": 2,
-    "duplicate-audit.md": 3,
+    "comprehensive-audit.md": 1,
+    "course-audit.md": 2,
+    "date-audit.md": 3,
+    "assignment-audit.md": 4,
+    "module-audit.md": 5,
+    "quiz-audit.md": 6,
+    "question-bank-audit.md": 7,
+    "grading-audit.md": 8,
+    "content-audit.md": 9,
+    "integration-audit.md": 10,
+    "migration-audit.md": 11,
+    "course-settings-audit.md": 12,
+    "duplicate-audit.md": 13,
+    "summary.md": 14,
 }
 
 
