@@ -115,7 +115,12 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     link_result = audit_links(snapshot)
 
     suite_payload = _load(snapshot / "comprehensive-audit.json", {})
-    findings = [dict(item, source_report=str(item.get("source_report") or "specialized audit")) for item in (suite_payload.get("findings") or []) if isinstance(item, dict)]
+    findings: list[dict[str, Any]] = []
+    for markdown_path in suite.report_paths:
+        payload = _load(markdown_path.with_suffix(".json"), {})
+        for item in payload.get("findings") or []:
+            if isinstance(item, dict):
+                findings.append({**item, "source_report": markdown_path.name})
 
     for path in (override_result.json_path, question_result.json_path, link_result.json_path):
         payload = _load(path, {})
