@@ -14,3 +14,21 @@ class NormalizeTests(unittest.TestCase):
         body = "x" * 3_000_000
         normalized = normalize_snapshot({"course": {}, "pages": [{"title": "Large page", "body": body}]})
         self.assertEqual(len(normalized["pages"][0]["body"]), 3_000_000)
+
+    def test_settings_ignore_volatile_signed_image_url(self):
+        left = normalize_snapshot({
+            "course": {},
+            "settings": {
+                "image": "https://example.invalid/banner.png?token=first-short-lived-token",
+                "lock_all_announcements": True,
+            },
+        })
+        right = normalize_snapshot({
+            "course": {},
+            "settings": {
+                "image": "https://example.invalid/banner.png?token=second-short-lived-token",
+                "lock_all_announcements": True,
+            },
+        })
+        self.assertEqual(left, right)
+        self.assertNotIn("image", left["settings"])
