@@ -15,6 +15,17 @@ See [Canvas API TL;DR](docs/CANVAS_API_TLDR.md) for the design and official API 
 
 Copy `.env.example` to `.env` and set your Canvas token. `.env` is ignored by Git.
 
+## Find your courses
+
+List courses available to the current Canvas user, including completed courses, and optionally filter by course name, code, SIS ID, or term:
+
+```bash
+bash bin/canvas-tool courses
+bash bin/canvas-tool courses RCET2265
+```
+
+This is intended to make it easy to locate previous-semester course IDs before running a recon or diff.
+
 ## First functional test
 
 Use a normal Canvas course URL directly:
@@ -79,7 +90,7 @@ For API work that does not deserve another one-off shell script:
 bash bin/canvas-tool api GET /api/v1/courses/18637/assignment_groups
 ```
 
-The same command can issue `POST`, `PUT`, `PATCH`, and `DELETE` requests when explicitly requested, with additional `curl` options passed after the endpoint. This is the low-level read/write escape hatch; the automated `doctor`, `inspect`, `recon`, and `diff` commands are read-only.
+The same command can issue `POST`, `PUT`, `PATCH`, and `DELETE` requests when explicitly requested, with additional `curl` options passed after the endpoint. This is the low-level read/write escape hatch; the automated `courses`, `doctor`, `inspect`, `recon`, and `diff` commands are read-only.
 
 ## Tests
 
@@ -88,7 +99,8 @@ The current tests do not require a real Canvas token:
 ```bash
 bash tests/test-course-target.sh
 bash tests/test-api-pagination.sh
+bash tests/test-courses.sh
 bash tests/test-recon-smoke.sh
 ```
 
-They cover URL/ID parsing and origin protection, Canvas pagination handling, and an end-to-end recon against a mocked API.
+They cover URL/ID parsing and origin protection, Canvas pagination handling, historical course discovery/filtering, and an end-to-end recon against a mocked API.
