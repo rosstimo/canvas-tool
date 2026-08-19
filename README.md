@@ -11,6 +11,7 @@ Development has moved to Python 3.13 with `uv` for reproducible environments. Th
 ./canvas-tool courses RCET2265
 ./canvas-tool recon 18637
 ./canvas-tool diff 11657 18637
+./canvas-tool duplicates 18637
 ```
 
 The launcher runs the Python CLI through the repository's locked `uv` project. Direct `uv` use also works:
@@ -19,7 +20,7 @@ The launcher runs the Python CLI through the repository's locked `uv` project. D
 uv run canvas-tool doctor 18637
 ```
 
-The Python runtime currently has **no third-party runtime dependencies**. The standard library handles HTTP, JSON, configuration, dates, and CLI parsing. `uv.lock` and `.python-version` keep development environments reproducible.
+The Python runtime currently has **no third-party runtime dependencies**. The standard library handles HTTP, JSON, configuration, dates, comparison, duplicate detection, and CLI parsing. `uv.lock` and `.python-version` keep development environments reproducible.
 
 The older Bash implementation remains in `bin/` and `lib/` during the rewrite as a known-working reference implementation. New feature work should target the Python package under `src/canvas_tool/`.
 
@@ -43,6 +44,7 @@ canvas-tool inspect <course-id-or-url>
 canvas-tool recon <course-id-or-url> [output-directory]
 canvas-tool snapshot <course-id-or-url> [output-directory]
 canvas-tool diff <course-a-id-or-url> <course-b-id-or-url>
+canvas-tool duplicates <course-id-or-url>
 canvas-tool api <METHOD> <path-or-url> [--paginate]
 ```
 
@@ -74,6 +76,25 @@ Important files are:
 
 Generated snapshots and comparisons are ignored by Git.
 
+## Duplicate audit
+
+`canvas-tool duplicates COURSE` performs a fresh read-only recon and audits normalized course content for duplicate candidates. It does not modify Canvas.
+
+The audit distinguishes three categories:
+
+- high-confidence candidates: same normalized name and same normalized content
+- review items: same normalized name but different content
+- similar-name candidates: lower-confidence names that are close enough to deserve inspection
+
+Results are written beside the snapshot as:
+
+```text
+duplicate-audit.md
+duplicate-audit.json
+```
+
+Matching names are intentionally never treated as permission to delete content. Any future cleanup feature will build an explicit review/dry-run plan before writes are allowed.
+
 ## Tests
 
 Python tests use the standard library and require no real Canvas token:
@@ -82,7 +103,7 @@ Python tests use the standard library and require no real Canvas token:
 uv run python -m unittest discover -s tests_py -v
 ```
 
-The initial rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, and compact comparison generation.
+The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, and duplicate-audit classification/reporting.
 
 The Bash prototype tests remain under `tests/` while parity is being checked.
 
@@ -90,7 +111,7 @@ The Bash prototype tests remain under `tests/` while parity is being checked.
 
 The next major workflows are semester-rollover tools:
 
-- destination-course audit for duplicate generated/imported modules and content
+- destination-course duplicate audit and eventual reviewed cleanup plans
 - date audit after Canvas import/shift
 - break-aware schedule planning for Spring Break vs. Thanksgiving
 - explicit dry-run plans before any write operations
