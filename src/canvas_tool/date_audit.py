@@ -9,6 +9,15 @@ from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .semester import (
+    day_to_dict,
+    days_from_calendar,
+    render_day_table,
+    semester_bounds,
+    week_for_date,
+    weeks_from_calendar,
+)
+
 
 @dataclass(frozen=True)
 class DateAuditResult:
@@ -28,10 +37,9 @@ def _parse_datetime(value: Any) -> datetime | None:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
-        parsed = datetime.fromisoformat(text)
+        return datetime.fromisoformat(text)
     except ValueError:
         return None
-    return parsed
 
 
 def _zone(name: str | None) -> ZoneInfo:
@@ -54,7 +62,19 @@ def _format_local(value: datetime | None) -> str:
     if value is None:
         return ""
     hour = value.strftime("%I:%M %p").lstrip("0")
-    return f"{value:%a %b} {value.day}, {value.year} {hour} {value.tzname() or ''}".strip()
+    return f"{value:%A, %B} {value.day}, {value.year} {hour} {value.tzname() or ''}".strip()
+
+
+def _format_date(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:%B} {value.day}, {value.year}"
+
+
+def _format_time(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return f"{value.strftime('%I:%M %p').lstrip('0')} {value.tzname() or ''}".strip()
 
 
 def _date_range_contains(period: dict[str, Any], day: date) -> bool:
@@ -74,7 +94,12 @@ def _load_calendar_file(path: Path) -> dict[str, Any]:
     return data
 
 
-def find_calendar(root: Path, manifest: dict[str, Any], course: dict[str, Any], explicit: Path | None = None) -> dict[str, Any] | None:
+def find_calendar(
+    root: Path,
+    manifest: dict[str, Any],
+    course: dict[str, Any],
+    explicit: Path | None = None,
+) -> dict[str, Any] | None:
     if explicit is not None:
         return _load_calendar_file(explicit.expanduser().resolve())
 
@@ -96,7 +121,13 @@ def find_calendar(root: Path, manifest: dict[str, Any], course: dict[str, Any], 
     return None
 
 
-def _issue(code: str, severity: str, message: str, assignment: str | None = None, assignment_id: Any = None) -> dict[str, Any]:
+def _issue(
+    code: str,
+    severity: str,
+    message: str,
+    assignment: str | None = None,
+    assignment_id: Any = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {"code": code, "severity": severity, "message": message}
     if assignment is not None:
         result["assignment"] = assignment
@@ -120,15 +151,19 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
 
     start_date: date | None = None
     end_date: date | None = None
-    if calendar:
-        try:
-            start_date = date.fromisoformat(str(calendar.get("start_date")))
-            end_date = date.fromisoformat(str(calendar.get("end_date")))
-        except ValueError:
-            start_date = end_date = None
+    semester_weeks = []
+    semester_days = []
+    break_periods: list[dict[str, Any]] = []
+    holiday_periods: list[dict[str, Any]] = []
+    special_periods: list[dict[str, Any]] = []
 
-    no_class_periods = list((calendar or {}).get("no_class_periods") or [])
-    special_periods = list((calendar or {}).get("special_periods") or [])
+    if calendar:
+        start_date, end_date = semester_bounds(calendar)
+        semester_weeks = weeks_from_calendar(calendar)
+        semester_days = days_from_calendar(calendar)
+        break_periods = list(calendar.get("break_weeks") or [])
+        holiday_periods = list(calendar.get("holidays") or calendar.get("no_class_periods") or [])
+        special_periods = list(calendar.get("special_periods") or [])
 
     rows: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
@@ -146,6 +181,8 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         lock = _local(assignment.get("lock_at"), zone)
         notes: list[str] = []
         row_issues: list[str] = []
+        week_number: int | None = None
+        week_label = ""
 
         if due is None:
             issues.append(_issue("missing_due_date", "review", "No due date is set.", name, assignment_id))
@@ -156,16 +193,21 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             due_times[due.strftime("%H:%M")] += 1
             weekdays[due.strftime("%A")] += 1
 
-            if start_date and day < start_date:
-                message = f"Due {_format_local(due)}, before the semester starts on {start_date.isoformat()}."
-                issues.append(_issue("before_term", "warning", message, name, assignment_id))
-                row_issues.append("before term")
-            if end_date and day > end_date:
-                message = f"Due {_format_local(due)}, after the semester ends on {end_date.isoformat()}."
-                issues.append(_issue("after_term", "warning", message, name, assignment_id))
-                row_issues.append("after term")
+            semester_week = week_for_date(semester_weeks, day) if semester_weeks else None
+            if semester_week is not None:
+                week_number = semester_week.week_number
+                week_label = semester_week.label
 
-            for period in no_class_periods:
+            if start_date and day < start_date:
+                message = f"Due {_format_local(due)}, before the first class day on {start_date.isoformat()}."
+                issues.append(_issue("before_term", "warning", message, name, assignment_id))
+                row_issues.append("before first class")
+            if end_date and day > end_date:
+                message = f"Due {_format_local(due)}, after the last class day on {end_date.isoformat()}."
+                issues.append(_issue("after_term", "warning", message, name, assignment_id))
+                row_issues.append("after last class")
+
+            for period in break_periods + holiday_periods:
                 if _date_range_contains(period, day):
                     period_name = str(period.get("name") or "no-class period")
                     issues.append(_issue("no_class_day", "warning", f"Due {_format_local(due)} during {period_name}.", name, assignment_id))
@@ -193,6 +235,11 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             "name": name,
             "assignment_group": group_names.get(str(assignment.get("assignment_group_id"))) or "",
             "published": assignment.get("published"),
+            "week_number": week_number,
+            "week_label": week_label,
+            "weekday": due.strftime("%A") if due else "",
+            "date_local": _format_date(due),
+            "time_local": _format_time(due),
             "due_at": assignment.get("due_at"),
             "due_local": _format_local(due),
             "unlock_at": assignment.get("unlock_at"),
@@ -216,10 +263,11 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         common_time, common_time_count = due_times.most_common(1)[0]
         dated_count_for_time = sum(due_times.values())
         if common_time_count >= 3 and common_time_count / dated_count_for_time >= 0.60:
+            common_display = datetime.strptime(common_time, "%H:%M").strftime("%I:%M %p").lstrip("0")
             for row in rows:
                 due = row.get("_due")
                 if isinstance(due, datetime) and due.strftime("%H:%M") != common_time:
-                    issues.append(_issue("due_time_outlier", "review", f"Due at {due.strftime('%I:%M %p').lstrip('0')}; most dated assignments are due at {datetime.strptime(common_time, '%H:%M').strftime('%I:%M %p').lstrip('0')}.", row["name"], row["id"]))
+                    issues.append(_issue("due_time_outlier", "review", f"Due at {due.strftime('%I:%M %p').lstrip('0')}; most dated assignments are due at {common_display}.", row["name"], row["id"]))
                     row["issues"].append("due-time outlier")
 
     distinct_days = sorted(dated_days)
@@ -233,9 +281,15 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         if not isinstance(module, dict) or not module.get("unlock_at"):
             continue
         unlock = _local(module.get("unlock_at"), zone)
+        unlock_week = week_for_date(semester_weeks, unlock.date()) if unlock and semester_weeks else None
         module_rows.append({
             "id": module.get("id"),
             "name": module.get("name") or "",
+            "week_number": unlock_week.week_number if unlock_week else None,
+            "week_label": unlock_week.label if unlock_week else "",
+            "weekday": unlock.strftime("%A") if unlock else "",
+            "date_local": _format_date(unlock),
+            "time_local": _format_time(unlock),
             "unlock_at": module.get("unlock_at"),
             "unlock_local": _format_local(unlock),
         })
@@ -243,18 +297,20 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
     dated_count = sum(1 for row in rows if row.get("due_at"))
     undated_count = len(rows) - dated_count
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
         "read_only": True,
         "time_zone": time_zone_name,
         "calendar": None if calendar is None else {key: value for key, value in calendar.items() if key != "_path"},
+        "semester_days": [day_to_dict(item) for item in semester_days],
         "summary": {
             "assignments": len(rows),
             "dated": dated_count,
             "undated": undated_count,
             "issues": len(issues),
+            "instructional_weeks": max((item.week_number or 0 for item in semester_days), default=0),
             "due_weekdays": dict(weekdays),
             "due_times": dict(due_times),
             "common_due_time": common_time,
@@ -283,8 +339,9 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         lines.append(f"- Calendar: **{calendar.get('name', 'matched calendar')}**")
         if calendar.get("source_name"):
             lines.append(f"- Calendar source: {calendar['source_name']}")
+        lines.extend(["", "## Semester calendar", "", render_day_table(semester_days), ""])
     else:
-        lines.append("- Calendar: **none matched**. Institutional break checks were skipped.")
+        lines.append("- Calendar: **none matched**. Week numbering and institutional break checks were skipped.")
 
     lines.extend(["", "## Attention needed", ""])
     if not issues:
@@ -299,8 +356,8 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
     lines.extend([
         "## Assignment schedule",
         "",
-        "| Due (local) | Assignment | Group | Availability | Notes |",
-        "|---|---|---|---|---|",
+        "| Week | Day | Date | Time | Assignment | Group | Availability | Notes |",
+        "|---:|---|---|---|---|---|---|---|",
     ])
     ordered_rows = sorted(rows, key=lambda item: (item.get("_due") is None, item.get("_due") or datetime.max.replace(tzinfo=zone), item.get("name") or ""))
     for row in ordered_rows:
@@ -310,8 +367,12 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         if row["lock_local"]:
             availability_parts.append(f"locks {row['lock_local']}")
         note_parts = list(row["notes"]) + list(row["issues"])
+        week_text = "" if row["week_number"] is None else str(row["week_number"])
         lines.append("| " + " | ".join([
-            row["due_local"] or "**NO DUE DATE**",
+            week_text,
+            row["weekday"],
+            row["date_local"] or "**NO DUE DATE**",
+            row["time_local"],
             str(row["name"]).replace("|", "\\|"),
             str(row["assignment_group"]).replace("|", "\\|"),
             "; ".join(availability_parts).replace("|", "\\|"),
@@ -319,6 +380,9 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         ]) + " |")
 
     lines.extend(["", "## Patterns", "", f"- Assignments: **{len(rows)}** total; **{dated_count}** dated; **{undated_count}** without a due date."])
+    instructional_weeks = max((item.week_number or 0 for item in semester_days), default=0)
+    if instructional_weeks:
+        lines.append(f"- Numbered instructional weeks: **{instructional_weeks}**.")
     if weekdays:
         weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         weekday_text = ", ".join(f"{day} {weekdays[day]}" for day in weekday_order if weekdays.get(day))
@@ -331,8 +395,10 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
 
     lines.extend(["", "## Module unlock dates", ""])
     if module_rows:
+        lines.extend(["| Week | Day | Date | Time | Module |", "|---:|---|---|---|---|"])
         for module in module_rows:
-            lines.append(f"- **{module['name']}**: {module['unlock_local']}")
+            week_text = "" if module["week_number"] is None else str(module["week_number"])
+            lines.append(f"| {week_text} | {module['weekday']} | {module['date_local']} | {module['time_local']} | {str(module['name']).replace('|', '\\|')} |")
     else:
         lines.append("No module unlock dates are set.")
 
