@@ -158,7 +158,7 @@ def normalize_snapshot(data: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "course": {"syllabus_body": normalize_html(course.get("syllabus_body")), "default_view": course.get("default_view"), "apply_assignment_group_weights": course.get("apply_assignment_group_weights"), "grading_standard_present": course.get("grading_standard_id") is not None, "course_format": course.get("course_format")},
-        "settings": {key: copy.deepcopy(value) for key, value in settings.items() if not key.endswith("_id")},
+        "settings": {key: copy.deepcopy(value) for key, value in settings.items() if not key.endswith("_id") and key != "image"},
         "tabs": _sort([{"id": item.get("id"), "label": item.get("label"), "type": item.get("type"), "hidden": item.get("hidden"), "visibility": item.get("visibility"), "position": item.get("position")} for item in tabs], "position", "label"),
         "modules": _sort(normalized_modules, "position", "name"),
         "assignment_groups": _sort(normalized_groups, "position", "name"),
