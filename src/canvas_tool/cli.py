@@ -15,7 +15,7 @@ from .course import CourseTargetError, resolve_course
 from .date_audit import audit_dates
 from .duplicates import audit_snapshot
 from .recon import Recon
-from .semester import build_semester_days, build_semester_weeks, parse_date, render_day_text
+from .semester import build_semester_weeks, format_day, parse_date, render_week_text
 
 
 def project_root() -> Path:
@@ -115,10 +115,12 @@ def command_dates_weeks(args: argparse.Namespace) -> int:
         {"name": name, "start": start, "end": end}
         for name, start, end in (args.break_periods or [])
     ]
-    days = build_semester_days(first, last, break_weeks=breaks)
-    weeks = build_semester_weeks(first, last, breaks)
+    weeks = build_semester_weeks(first, last, break_weeks=breaks)
     instructional_weeks = max((week.week_number or 0 for week in weeks), default=0)
-    print(render_day_text(days))
+    print(f"First day of class: {format_day(first)}")
+    print(f"Last day of class:  {format_day(last)}")
+    print()
+    print(render_week_text(weeks))
     print(f"\nNumbered instructional weeks: {instructional_weeks}")
     return 0
 
@@ -162,10 +164,23 @@ def parser() -> argparse.ArgumentParser:
 
     dates = sub.add_parser("dates", help="semester calendar and Canvas date tools")
     dates_sub = dates.add_subparsers(dest="dates_command", required=True)
-    weeks = dates_sub.add_parser("weeks", help="number instructional weeks from first to last class day")
-    weeks.add_argument("first_class", help="first class day, YYYY-MM-DD")
-    weeks.add_argument("last_class", help="last class day, YYYY-MM-DD")
-    weeks.add_argument("--break", dest="break_periods", action="append", nargs=3, metavar=("NAME", "START", "END"), help="unnumbered break week; repeat as needed")
+    weeks = dates_sub.add_parser(
+        "weeks",
+        help="number Sunday-Saturday instructional weeks from first to last class day",
+        description="Build a Sunday-Saturday semester week reference. All dates must use YYYY-MM-DD, for example 2026-08-24.",
+        epilog='Example:\n  canvas-tool dates weeks 2026-08-24 2026-12-18 --break "Thanksgiving Break" 2026-11-23 2026-11-27',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    weeks.add_argument("first_class", metavar="FIRST_CLASS_YYYY-MM-DD", help="first day of class in YYYY-MM-DD format")
+    weeks.add_argument("last_class", metavar="LAST_CLASS_YYYY-MM-DD", help="last day of class in YYYY-MM-DD format")
+    weeks.add_argument(
+        "--break",
+        dest="break_periods",
+        action="append",
+        nargs=3,
+        metavar=("NAME", "START_YYYY-MM-DD", "END_YYYY-MM-DD"),
+        help="unnumbered break week; break start/end dates use YYYY-MM-DD; repeat as needed",
+    )
     weeks.set_defaults(func=command_dates_weeks)
     dates_audit = dates_sub.add_parser("audit", help="recon a course and audit assignment dates (read-only)")
     dates_audit.add_argument("course")
