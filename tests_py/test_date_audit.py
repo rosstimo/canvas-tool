@@ -103,6 +103,9 @@ class DateAuditTests(unittest.TestCase):
             self.assertEqual(result.assignment_count, 3)
             self.assertEqual(result.dated_count, 2)
             self.assertEqual(result.undated_count, 1)
+            self.assertEqual(report["summary"]["instructional_weeks"], 16)
+            self.assertEqual(report["semester_weeks"][0]["calendar_start"], "2026-08-23")
+            self.assertEqual(report["semester_weeks"][0]["calendar_end"], "2026-08-29")
             self.assertIn("no_class_day", codes)
             self.assertIn("missing_due_date", codes)
             self.assertIn("unlock_after_due", codes)
@@ -170,10 +173,11 @@ class DateAuditTests(unittest.TestCase):
             break_item = next(item for item in report["assignments"] if item["id"] == 31)
             self.assertIsNone(break_item["week_number"])
             self.assertEqual(break_item["week_label"], "Thanksgiving Break")
-            self.assertIn("no_class_day", codes)
+            self.assertIn("break_week", codes)
 
             text = result.markdown_path.read_text(encoding="utf-8")
             self.assertNotIn("Name indicates", text)
+            self.assertIn("unnumbered Thanksgiving Break week", text)
 
     def test_runs_without_matching_institution_calendar(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -183,6 +187,8 @@ class DateAuditTests(unittest.TestCase):
             self.assertIsNone(result.calendar_name)
             report = json.loads(result.json_path.read_text(encoding="utf-8"))
             self.assertIsNone(report["assignments"][0]["week_number"])
+            text = result.markdown_path.read_text(encoding="utf-8")
+            self.assertIn("Calendar: **none matched**", text)
 
 
 if __name__ == "__main__":
