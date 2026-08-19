@@ -12,6 +12,7 @@ from .api import CanvasApiError, CanvasClient
 from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
+from .course_audit import audit_course
 from .date_audit import audit_dates
 from .duplicates import audit_snapshot
 from .recon import Recon
@@ -108,6 +109,22 @@ def command_duplicates(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_audit(args: argparse.Namespace) -> int:
+    _config, client = client_from_config()
+    root = project_root()
+    snapshot = Recon(client, root).run(args.course).path
+    calendar = Path(args.calendar).expanduser().resolve() if args.calendar else None
+    result = audit_course(snapshot, root, calendar)
+    print("Course audit")
+    print(f"  Weekly structure issues:    {result.structure_issue_count}")
+    print(f"  Date/schedule issues:       {result.date_issue_count}")
+    print(f"  Duplicate candidates:       {result.duplicate_count}")
+    print("  Canvas changes:             none (read-only)")
+    print(f"  Report: {result.markdown_path}")
+    print(f"  JSON:   {result.json_path}")
+    return 0
+
+
 def command_dates_weeks(args: argparse.Namespace) -> int:
     first = parse_date(args.first_class, "first class date")
     last = parse_date(args.last_class, "last class date")
@@ -161,6 +178,10 @@ def parser() -> argparse.ArgumentParser:
         recon = sub.add_parser(name, help="capture a sanitized course snapshot"); recon.add_argument("course"); recon.add_argument("output", nargs="?"); recon.set_defaults(func=command_recon)
     diff = sub.add_parser("diff", help="recon and compare two courses"); diff.add_argument("course_a"); diff.add_argument("course_b"); diff.set_defaults(func=command_diff)
     duplicates = sub.add_parser("duplicates", help="recon a course and report duplicate-content candidates (read-only)"); duplicates.add_argument("course"); duplicates.set_defaults(func=command_duplicates)
+    audit = sub.add_parser("audit", help="recon a course and run structural, date, and duplicate checks (read-only)")
+    audit.add_argument("course")
+    audit.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
+    audit.set_defaults(func=command_audit)
 
     dates = sub.add_parser("dates", help="semester calendar and Canvas date tools")
     dates_sub = dates.add_subparsers(dest="dates_command", required=True)
