@@ -190,8 +190,9 @@ def render_day_text(days: list[SemesterDay]) -> str:
     for item in days:
         week = "" if item.week_number is None else str(item.week_number)
         notes = "; ".join(item.notes)
+        day_text = item.day.strftime("%A")
         date_text = f"{item.day:%B} {item.day.day}, {item.day.year}"
-        lines.append(f"{week:<6}{item.day:%A<12}{date_text:<22}{notes}")
+        lines.append(f"{week:<6}{day_text:<12}{date_text:<22}{notes}")
     return "\n".join(lines)
 
 
