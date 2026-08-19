@@ -12,8 +12,10 @@ from .api import CanvasApiError, CanvasClient
 from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
+from .date_audit import audit_dates
 from .duplicates import audit_snapshot
 from .recon import Recon
+from .semester import build_semester_days, build_semester_weeks, parse_date, render_day_text
 
 
 def project_root() -> Path:
@@ -106,6 +108,39 @@ def command_duplicates(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_dates_weeks(args: argparse.Namespace) -> int:
+    first = parse_date(args.first_class, "first class date")
+    last = parse_date(args.last_class, "last class date")
+    breaks = [
+        {"name": name, "start": start, "end": end}
+        for name, start, end in (args.break_periods or [])
+    ]
+    days = build_semester_days(first, last, break_weeks=breaks)
+    weeks = build_semester_weeks(first, last, breaks)
+    instructional_weeks = max((week.week_number or 0 for week in weeks), default=0)
+    print(render_day_text(days))
+    print(f"\nNumbered instructional weeks: {instructional_weeks}")
+    return 0
+
+
+def command_dates_audit(args: argparse.Namespace) -> int:
+    _config, client = client_from_config()
+    root = project_root()
+    snapshot = Recon(client, root).run(args.course).path
+    calendar = Path(args.calendar).expanduser().resolve() if args.calendar else None
+    result = audit_dates(snapshot, root, calendar)
+    print("Date audit")
+    print(f"  Calendar:          {result.calendar_name or 'none matched'}")
+    print(f"  Assignments:       {result.assignment_count}")
+    print(f"  Dated:             {result.dated_count}")
+    print(f"  Missing due date:  {result.undated_count}")
+    print(f"  Review flags:      {result.issue_count}")
+    print("  Canvas changes:    none (read-only)")
+    print(f"  Report: {result.markdown_path}")
+    print(f"  JSON:   {result.json_path}")
+    return 0
+
+
 def command_api(args: argparse.Namespace) -> int:
     _config, client = client_from_config()
     value = client.paginate(args.target) if args.method.upper() == "GET" and args.paginate else client.request_json(args.method.upper(), args.target)
@@ -124,6 +159,19 @@ def parser() -> argparse.ArgumentParser:
         recon = sub.add_parser(name, help="capture a sanitized course snapshot"); recon.add_argument("course"); recon.add_argument("output", nargs="?"); recon.set_defaults(func=command_recon)
     diff = sub.add_parser("diff", help="recon and compare two courses"); diff.add_argument("course_a"); diff.add_argument("course_b"); diff.set_defaults(func=command_diff)
     duplicates = sub.add_parser("duplicates", help="recon a course and report duplicate-content candidates (read-only)"); duplicates.add_argument("course"); duplicates.set_defaults(func=command_duplicates)
+
+    dates = sub.add_parser("dates", help="semester calendar and Canvas date tools")
+    dates_sub = dates.add_subparsers(dest="dates_command", required=True)
+    weeks = dates_sub.add_parser("weeks", help="number instructional weeks from first to last class day")
+    weeks.add_argument("first_class", help="first class day, YYYY-MM-DD")
+    weeks.add_argument("last_class", help="last class day, YYYY-MM-DD")
+    weeks.add_argument("--break", dest="break_periods", action="append", nargs=3, metavar=("NAME", "START", "END"), help="unnumbered break week; repeat as needed")
+    weeks.set_defaults(func=command_dates_weeks)
+    dates_audit = dates_sub.add_parser("audit", help="recon a course and audit assignment dates (read-only)")
+    dates_audit.add_argument("course")
+    dates_audit.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
+    dates_audit.set_defaults(func=command_dates_audit)
+
     api = sub.add_parser("api", help="low-level Canvas API escape hatch"); api.add_argument("method"); api.add_argument("target"); api.add_argument("--paginate", action="store_true", help="follow Canvas pagination for GET collections"); api.set_defaults(func=command_api)
     return p
 
@@ -132,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         return int(args.func(args))
-    except (ConfigError, CourseTargetError) as exc:
+    except (ConfigError, CourseTargetError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     except CanvasApiError as exc:
