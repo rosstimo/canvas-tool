@@ -221,8 +221,8 @@ canvas_compare_snapshots() {
 
     {
         printf '# Canvas course comparison\n\n'
-        printf '- A: **%s** (`%s`, ID `%s`)\n' "$na" "$ca" "$ia"
-        printf '- B: **%s** (`%s`, ID `%s`)\n\n' "$nb" "$cb" "$ib"
+        printf -- '- A: **%s** (`%s`, ID `%s`)\n' "$na" "$ca" "$ia"
+        printf -- '- B: **%s** (`%s`, ID `%s`)\n\n' "$nb" "$cb" "$ib"
         printf '## Changed areas\n\n'
         printf '| Area | A count | B count |\n|---|---:|---:|\n'
         while IFS=$'\t' read -r area old_count new_count; do
