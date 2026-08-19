@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from canvas_tool.date_audit import audit_dates
+from canvas_tool.schedule_audit import audit_dates
 
 
 class DateAuditTests(unittest.TestCase):
@@ -29,6 +29,8 @@ class DateAuditTests(unittest.TestCase):
                 "id": 10,
                 "name": "Labor Day assignment",
                 "assignment_group_id": 1,
+                "grading_type": "points",
+                "points_possible": 10,
                 "published": True,
                 "due_at": "2026-09-07T18:00:00Z",
                 "unlock_at": None,
@@ -39,6 +41,8 @@ class DateAuditTests(unittest.TestCase):
                 "id": 11,
                 "name": "Undated assignment",
                 "assignment_group_id": 1,
+                "grading_type": "points",
+                "points_possible": 10,
                 "published": True,
                 "due_at": None,
                 "unlock_at": None,
@@ -49,6 +53,8 @@ class DateAuditTests(unittest.TestCase):
                 "id": 12,
                 "name": "Bad availability",
                 "assignment_group_id": 1,
+                "grading_type": "points",
+                "points_possible": 10,
                 "published": True,
                 "due_at": "2026-09-08T18:00:00Z",
                 "unlock_at": "2026-09-09T18:00:00Z",
@@ -57,7 +63,7 @@ class DateAuditTests(unittest.TestCase):
             },
         ])
         self.write_json(snapshot / "modules.json", [
-            {"id": 20, "name": "Week 2", "unlock_at": "2026-09-01T14:00:00Z"}
+            {"id": 20, "name": "Anything", "unlock_at": "2026-09-01T14:00:00Z", "published": True}
         ])
         return snapshot
 
@@ -97,9 +103,6 @@ class DateAuditTests(unittest.TestCase):
             self.assertEqual(result.assignment_count, 3)
             self.assertEqual(result.dated_count, 2)
             self.assertEqual(result.undated_count, 1)
-            self.assertEqual(report["summary"]["instructional_weeks"], 16)
-            self.assertEqual(report["semester_weeks"][0]["calendar_start"], "2026-08-23")
-            self.assertEqual(report["semester_weeks"][0]["calendar_end"], "2026-08-29")
             self.assertIn("no_class_day", codes)
             self.assertIn("missing_due_date", codes)
             self.assertIn("unlock_after_due", codes)
@@ -117,11 +120,12 @@ class DateAuditTests(unittest.TestCase):
             self.assertIn("August 23-29, 2026", text)
             self.assertIn("Labor Day holiday", text)
             self.assertIn("Thanksgiving Break", text)
-            self.assertIn("| Week | Day | Date | Time | Assignment", text)
+            self.assertIn("| Week | Day | Date | Time | Item", text)
             self.assertIn("NO DUE DATE", text)
             self.assertIn("Module unlock dates", text)
+            self.assertIn("Names and titles are not interpreted", text)
 
-    def test_flags_week_number_in_assignment_name_against_due_date(self):
+    def test_assignment_names_are_not_interpreted(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             snapshot = self.make_snapshot(root)
@@ -129,8 +133,10 @@ class DateAuditTests(unittest.TestCase):
             self.write_json(snapshot / "assignments.json", [
                 {
                     "id": 30,
-                    "name": "W07 - Shuffle The Deck",
+                    "name": "W99 - Arbitrary Label",
                     "assignment_group_id": 1,
+                    "grading_type": "points",
+                    "points_possible": 10,
                     "published": True,
                     "due_at": "2026-09-28T05:00:00Z",
                     "unlock_at": None,
@@ -139,20 +145,12 @@ class DateAuditTests(unittest.TestCase):
                 },
                 {
                     "id": 31,
-                    "name": "Week 15 - StansGrocery",
+                    "name": "Week 2 - Also Just Text",
                     "assignment_group_id": 1,
+                    "grading_type": "points",
+                    "points_possible": 10,
                     "published": True,
                     "due_at": "2026-11-23T06:00:00Z",
-                    "unlock_at": None,
-                    "lock_at": None,
-                    "has_overrides": False,
-                },
-                {
-                    "id": 32,
-                    "name": "Ordinary assignment 07",
-                    "assignment_group_id": 1,
-                    "published": True,
-                    "due_at": "2026-09-28T05:00:00Z",
                     "unlock_at": None,
                     "lock_at": None,
                     "has_overrides": False,
@@ -163,26 +161,19 @@ class DateAuditTests(unittest.TestCase):
             report = json.loads(result.json_path.read_text(encoding="utf-8"))
             codes = [item["code"] for item in report["issues"]]
 
-            self.assertIn("week_name_mismatch", codes)
-            self.assertIn("week_name_break", codes)
+            self.assertNotIn("week_name_mismatch", codes)
+            self.assertNotIn("week_name_break", codes)
 
-            w07 = next(item for item in report["assignments"] if item["id"] == 30)
-            self.assertEqual(w07["declared_week_number"], 7)
-            self.assertEqual(w07["week_number"], 6)
-            self.assertIn("name says Week 7; date is Week 6", w07["issues"])
+            first = next(item for item in report["assignments"] if item["id"] == 30)
+            self.assertEqual(first["week_number"], 6)
 
-            w15 = next(item for item in report["assignments"] if item["id"] == 31)
-            self.assertEqual(w15["declared_week_number"], 15)
-            self.assertIsNone(w15["week_number"])
-            self.assertEqual(w15["week_label"], "Thanksgiving Break")
-            self.assertIn("name says Week 15; due in Thanksgiving Break", w15["issues"])
-
-            ordinary = next(item for item in report["assignments"] if item["id"] == 32)
-            self.assertIsNone(ordinary["declared_week_number"])
+            break_item = next(item for item in report["assignments"] if item["id"] == 31)
+            self.assertIsNone(break_item["week_number"])
+            self.assertEqual(break_item["week_label"], "Thanksgiving Break")
+            self.assertIn("no_class_day", codes)
 
             text = result.markdown_path.read_text(encoding="utf-8")
-            self.assertIn("Name indicates Week 7", text)
-            self.assertIn("unnumbered Thanksgiving Break week", text)
+            self.assertNotIn("Name indicates", text)
 
     def test_runs_without_matching_institution_calendar(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,8 +181,8 @@ class DateAuditTests(unittest.TestCase):
             snapshot = self.make_snapshot(root)
             result = audit_dates(snapshot, root)
             self.assertIsNone(result.calendar_name)
-            text = result.markdown_path.read_text(encoding="utf-8")
-            self.assertIn("none matched", text)
+            report = json.loads(result.json_path.read_text(encoding="utf-8"))
+            self.assertIsNone(report["assignments"][0]["week_number"])
 
 
 if __name__ == "__main__":
