@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .report_index import refresh_report_index
+
 
 def _load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -40,9 +42,20 @@ def compare_snapshots(a: Path, b: Path, root: Path) -> tuple[Path, Path, list[tu
         else:
             changed.append((key, "-", "-"))
 
-    lines = ["# Canvas course comparison", "", f"- A: **{ma['course_name']}** (`{ma.get('course_code','')}`, ID `{ia}`)", f"- B: **{mb['course_name']}** (`{mb.get('course_code','')}`, ID `{ib}`)", "", "## Changed areas", "", "| Area | A count | B count |", "|---|---:|---:|"]
+    lines = [
+        "# Canvas course comparison",
+        "",
+        f"- A: **{ma['course_name']}** (`{ma.get('course_code','')}`, ID `{ia}`)",
+        f"- B: **{mb['course_name']}** (`{mb.get('course_code','')}`, ID `{ib}`)",
+        "",
+        "## Changed areas",
+        "",
+        "| Area | A count | B count |",
+        "|---|---:|---:|",
+    ]
     for area, left, right in changed:
         lines.append(f"| `{area}` | {left} | {right} |")
-    lines += ["", f"Detailed unified diff: `{diff_path}`"]
+    lines += ["", f"[Detailed unified diff]({diff_path.name})"]
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    refresh_report_index(directory)
     return summary_path, diff_path, changed
