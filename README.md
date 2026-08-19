@@ -1,60 +1,64 @@
 # canvas-tool
 
-A small command-line tool for inspecting, comparing, and eventually managing Canvas LMS courses through the Canvas API.
+A command-line tool for inspecting, comparing, auditing, and eventually managing Canvas LMS courses through the Canvas API.
 
-The current development branch provides a read-only course recon workflow plus a raw API escape hatch. Recon intentionally avoids student rosters, enrollments, submissions, grades, and discussion entries.
+## Python rewrite
 
-See [Canvas API TL;DR](docs/CANVAS_API_TLDR.md) for the design and official API references.
-
-## Requirements
-
-- Bash
-- `curl`
-- `jq`
-- standard Unix tools (`awk`, `sed`, `find`, `diff`)
-
-Copy `.env.example` to `.env` and set your Canvas token. `.env` is ignored by Git.
-
-## Find your courses
-
-List courses available to the current Canvas user, including completed courses, and optionally filter by course name, code, SIS ID, or term:
+Development has moved to Python 3.13 with `uv` for reproducible environments. The source checkout has a root launcher, so normal development use stays simple:
 
 ```bash
-bash bin/canvas-tool courses
-bash bin/canvas-tool courses RCET2265
+./canvas-tool doctor 18637
+./canvas-tool courses RCET2265
+./canvas-tool recon 18637
+./canvas-tool diff 11657 18637
 ```
 
-This is intended to make it easy to locate previous-semester course IDs before running a recon or diff.
-
-## First functional test
-
-Use a normal Canvas course URL directly:
+The launcher runs the Python CLI through the repository's locked `uv` project. Direct `uv` use also works:
 
 ```bash
-bash bin/canvas-tool doctor https://isu.instructure.com/courses/18637
+uv run canvas-tool doctor 18637
 ```
 
-Expected output is a series of `PASS` lines followed by the course name and course code. The URL supplies the Canvas origin and internal course ID; the origin must match `CANVAS_BASE_URL` before the bearer token is sent.
+The Python runtime currently has **no third-party runtime dependencies**. The standard library handles HTTP, JSON, configuration, dates, and CLI parsing. `uv.lock` and `.python-version` keep development environments reproducible.
 
-Then inspect the course identity and permissions:
+The older Bash implementation remains in `bin/` and `lib/` during the rewrite as a known-working reference implementation. New feature work should target the Python package under `src/canvas_tool/`.
 
-```bash
-bash bin/canvas-tool inspect https://isu.instructure.com/courses/18637
+## Configuration
+
+For compatibility with the prototype, copy `.env.example` to `.env` and configure:
+
+```text
+CANVAS_BASE_URL=https://isu.instructure.com
+CANVAS_API_TOKEN=...
 ```
+
+`.env` is ignored by Git. Environment variables override file values. The Python configuration layer is also structured to support a per-user config file later, so packaged releases will not require running from a Git checkout.
+
+## Current commands
+
+```text
+canvas-tool courses [search]
+canvas-tool doctor <course-id-or-url>
+canvas-tool inspect <course-id-or-url>
+canvas-tool recon <course-id-or-url> [output-directory]
+canvas-tool snapshot <course-id-or-url> [output-directory]
+canvas-tool diff <course-a-id-or-url> <course-b-id-or-url>
+canvas-tool api <METHOD> <path-or-url> [--paginate]
+```
+
+Course targets accept all of these forms:
+
+```text
+17600
+isu.instructure.com/courses/17600
+https://isu.instructure.com/courses/17600
+```
+
+A URL must match `CANVAS_BASE_URL` before credentials are sent.
 
 ## Recon
 
-```bash
-bash bin/canvas-tool recon https://isu.instructure.com/courses/18637
-```
-
-A bare numeric ID works too:
-
-```bash
-bash bin/canvas-tool recon 18637
-```
-
-The default output is:
+Recon intentionally avoids student rosters, enrollments, submissions, grades, quiz submissions, and discussion entries. The default output remains:
 
 ```text
 snapshots/<canvas-host>/<course-id>/
@@ -62,45 +66,33 @@ snapshots/<canvas-host>/<course-id>/
 
 Important files are:
 
-- `summary.md` - quick human-readable inventory
+- `summary.md` - human-readable inventory
 - `manifest.json` - snapshot identity and capture metadata
-- `normalized.json` - structural/content representation intended for cross-semester comparison
+- `normalized.json` - structural/content representation for cross-semester comparison
 - `errors.json` - endpoints that were unavailable or denied
-- the remaining JSON files - sanitized API responses for individual Canvas resource types
+- the remaining JSON files - sanitized API responses for Canvas resource types
 
-Generated snapshots are ignored by Git.
-
-## Compare two courses
-
-`diff` performs a fresh recon of both courses and compares their normalized forms:
-
-```bash
-bash bin/canvas-tool diff 18000 18637
-```
-
-Concrete Canvas object IDs and semester-specific dates are omitted from the normalized representation where practical so copied courses do not differ solely because Canvas assigned new IDs or the semester changed.
-
-Comparison output is saved under `comparisons/`, which is also ignored by Git.
-
-## Raw API access
-
-For API work that does not deserve another one-off shell script:
-
-```bash
-bash bin/canvas-tool api GET /api/v1/courses/18637/assignment_groups
-```
-
-The same command can issue `POST`, `PUT`, `PATCH`, and `DELETE` requests when explicitly requested, with additional `curl` options passed after the endpoint. This is the low-level read/write escape hatch; the automated `courses`, `doctor`, `inspect`, `recon`, and `diff` commands are read-only.
+Generated snapshots and comparisons are ignored by Git.
 
 ## Tests
 
-The current tests do not require a real Canvas token:
+Python tests use the standard library and require no real Canvas token:
 
 ```bash
-bash tests/test-course-target.sh
-bash tests/test-api-pagination.sh
-bash tests/test-courses.sh
-bash tests/test-recon-smoke.sh
+uv run python -m unittest discover -s tests_py -v
 ```
 
-They cover URL/ID parsing and origin protection, Canvas pagination handling, historical course discovery/filtering, and an end-to-end recon against a mocked API.
+The initial rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, and compact comparison generation.
+
+The Bash prototype tests remain under `tests/` while parity is being checked.
+
+## Direction
+
+The next major workflows are semester-rollover tools:
+
+- destination-course audit for duplicate generated/imported modules and content
+- date audit after Canvas import/shift
+- break-aware schedule planning for Spring Break vs. Thanksgiving
+- explicit dry-run plans before any write operations
+
+See [Canvas API TL;DR](docs/CANVAS_API_TLDR.md) for the API design notes and official references gathered during the prototype work.

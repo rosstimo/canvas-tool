@@ -1,0 +1,14 @@
+[project]
+name = "canvas-tool"
+version = "0.2.0.dev0"
+description = "Safe Canvas LMS course inspection, recon, comparison, and semester rollover tooling"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[project.scripts]
+canvas-tool = "canvas_tool.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.13"]
+build-backend = "uv_build"
