@@ -42,8 +42,19 @@ canvas_resolve_course() {
         return 0
     fi
 
+    # A pasted browser URL is the most explicit form.
     if [[ "$target" =~ ^(https://[^/]+)/courses/([0-9]+)([/\?#].*)?$ ]]; then
         CANVAS_COURSE_BASE_URL="${BASH_REMATCH[1]}"
+        CANVAS_COURSE_ID="${BASH_REMATCH[2]}"
+        canvas_assert_same_origin "$CANVAS_COURSE_BASE_URL"
+        return $?
+    fi
+
+    # Also accept the natural scheme-less form, e.g.
+    # isu.instructure.com/courses/18637. Canvas API authentication must use
+    # HTTPS, so normalize it to https:// before applying the same-origin check.
+    if [[ "$target" =~ ^([^/:?#]+(?::[0-9]+)?)/courses/([0-9]+)([/\?#].*)?$ ]]; then
+        CANVAS_COURSE_BASE_URL="https://${BASH_REMATCH[1]}"
         CANVAS_COURSE_ID="${BASH_REMATCH[2]}"
         canvas_assert_same_origin "$CANVAS_COURSE_BASE_URL"
         return $?
