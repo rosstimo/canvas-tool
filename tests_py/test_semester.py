@@ -1,10 +1,28 @@
 import unittest
 from datetime import date
 
-from canvas_tool.semester import build_semester_days, build_semester_weeks, render_day_text, week_for_date
+from canvas_tool.semester import (
+    build_semester_days,
+    build_semester_weeks,
+    render_day_text,
+    render_week_text,
+    week_for_date,
+)
 
 
 class SemesterTests(unittest.TestCase):
+    def test_weeks_run_sunday_through_saturday(self):
+        weeks = build_semester_weeks(date(2026, 8, 24), date(2026, 12, 18))
+
+        first = weeks[0]
+        last = weeks[-1]
+
+        self.assertEqual(first.week_number, 1)
+        self.assertEqual(first.calendar_start, date(2026, 8, 23))
+        self.assertEqual(first.calendar_end, date(2026, 8, 29))
+        self.assertEqual(last.calendar_start, date(2026, 12, 13))
+        self.assertEqual(last.calendar_end, date(2026, 12, 19))
+
     def test_break_week_is_visible_but_does_not_consume_week_number(self):
         breaks = [
             {"name": "Thanksgiving Break", "start": "2026-11-23", "end": "2026-11-27"}
@@ -19,8 +37,23 @@ class SemesterTests(unittest.TestCase):
         self.assertEqual(before.week_number, 13)
         self.assertIsNone(break_week.week_number)
         self.assertEqual(break_week.label, "Thanksgiving Break")
+        self.assertEqual(break_week.calendar_start, date(2026, 11, 22))
+        self.assertEqual(break_week.calendar_end, date(2026, 11, 28))
         self.assertEqual(after.week_number, 14)
         self.assertEqual(finals.week_number, 16)
+
+    def test_week_reference_is_compact_date_ranges(self):
+        breaks = [
+            {"name": "Thanksgiving Break", "start": "2026-11-23", "end": "2026-11-27"}
+        ]
+        weeks = build_semester_weeks(date(2026, 8, 24), date(2026, 12, 18), breaks)
+        text = render_week_text(weeks)
+
+        self.assertIn("DATE RANGE (SUNDAY-SATURDAY)", text)
+        self.assertIn("August 23-29, 2026", text)
+        self.assertIn("November 22-28, 2026", text)
+        self.assertIn("Thanksgiving Break", text)
+        self.assertIn("December 13-19, 2026", text)
 
     def test_daily_view_has_week_day_date_and_blank_week_during_break(self):
         breaks = [
