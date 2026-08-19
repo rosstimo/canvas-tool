@@ -135,6 +135,38 @@ class OverviewTests(unittest.TestCase):
                         {"name": "Thanksgiving Break", "start": "2026-11-23", "end": "2026-11-27"}
                     ],
                 },
+                "semester_weeks": [
+                    {
+                        "week_number": 1,
+                        "label": "Week 1",
+                        "kind": "instruction",
+                        "calendar_start": "2026-08-23",
+                        "calendar_end": "2026-08-29",
+                        "start": "2026-08-24",
+                        "end": "2026-08-29",
+                        "notes": [],
+                    },
+                    {
+                        "week_number": None,
+                        "label": "Thanksgiving Break",
+                        "kind": "break",
+                        "calendar_start": "2026-11-22",
+                        "calendar_end": "2026-11-28",
+                        "start": "2026-11-22",
+                        "end": "2026-11-28",
+                        "notes": [],
+                    },
+                    {
+                        "week_number": 16,
+                        "label": "Week 16",
+                        "kind": "instruction",
+                        "calendar_start": "2026-12-13",
+                        "calendar_end": "2026-12-19",
+                        "start": "2026-12-13",
+                        "end": "2026-12-18",
+                        "notes": ["Finals week"],
+                    },
+                ],
                 "issues": [{
                     "code": "missing_due_date",
                     "severity": "review",
@@ -221,8 +253,14 @@ class OverviewTests(unittest.TestCase):
             text = result.markdown_path.read_text(encoding="utf-8")
             self.assertIn("FIRST DAY OF CLASS: **Monday, August 24, 2026**", text)
             self.assertIn("LAST DAY OF CLASS: **Friday, December 18, 2026**", text)
+            self.assertIn("### Week number reference", text)
+            self.assertIn("| Week | Date range (Sunday-Saturday) | Notes |", text)
+            self.assertIn("| 1 | August 23-29, 2026 |  |", text)
+            self.assertIn("| — | November 22-28, 2026 | Thanksgiving Break |", text)
+            self.assertIn("| 16 | December 13-19, 2026 | Finals week |", text)
             self.assertIn("./canvas-tool dates weeks 2026-08-24 2026-12-18", text)
             self.assertIn("'Thanksgiving Break'", text)
+            self.assertNotIn("not from item or module names", text)
             self.assertIn("Required completion items: **2**", text)
             self.assertIn("[**Memory Lab**](#module-item-101) — Submit", text)
             self.assertIn("POSSIBLE DUPLICATE: exact module name match", text)
