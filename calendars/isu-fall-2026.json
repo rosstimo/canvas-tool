@@ -1,21 +1,23 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Idaho State University Fall 2026",
   "canvas_host": "isu.instructure.com",
   "term_name": "Fall 2026",
   "time_zone": "America/Denver",
-  "start_date": "2026-08-24",
-  "end_date": "2026-12-18",
-  "no_class_periods": [
-    {
-      "name": "Labor Day holiday",
-      "start": "2026-09-07",
-      "end": "2026-09-07"
-    },
+  "first_class_date": "2026-08-24",
+  "last_class_date": "2026-12-18",
+  "break_weeks": [
     {
       "name": "Thanksgiving Break",
       "start": "2026-11-23",
       "end": "2026-11-27"
+    }
+  ],
+  "holidays": [
+    {
+      "name": "Labor Day holiday",
+      "start": "2026-09-07",
+      "end": "2026-09-07"
     }
   ],
   "special_periods": [
