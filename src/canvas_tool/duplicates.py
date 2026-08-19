@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from .report_index import refresh_report_index
+
 
 _RESOURCE_SPECS = (
     ("modules", "Modules", "name"),
@@ -41,8 +43,6 @@ def _name_key(value: Any) -> str:
 def _content_value(record: dict[str, Any], title_field: str) -> Any:
     value = dict(record)
     value.pop(title_field, None)
-    # A copied object can legitimately live at a different top-level position.
-    # Position should not make otherwise identical content look different.
     value.pop("position", None)
     return value
 
@@ -181,6 +181,7 @@ def audit_snapshot(snapshot: Path) -> DuplicateAuditResult:
     )
 
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    refresh_report_index(snapshot)
     return DuplicateAuditResult(
         markdown_path=markdown_path,
         json_path=json_path,
