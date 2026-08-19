@@ -121,6 +121,69 @@ class DateAuditTests(unittest.TestCase):
             self.assertIn("NO DUE DATE", text)
             self.assertIn("Module unlock dates", text)
 
+    def test_flags_week_number_in_assignment_name_against_due_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot = self.make_snapshot(root)
+            self.make_calendar(root)
+            self.write_json(snapshot / "assignments.json", [
+                {
+                    "id": 30,
+                    "name": "W07 - Shuffle The Deck",
+                    "assignment_group_id": 1,
+                    "published": True,
+                    "due_at": "2026-09-28T05:00:00Z",
+                    "unlock_at": None,
+                    "lock_at": None,
+                    "has_overrides": False,
+                },
+                {
+                    "id": 31,
+                    "name": "Week 15 - StansGrocery",
+                    "assignment_group_id": 1,
+                    "published": True,
+                    "due_at": "2026-11-23T06:00:00Z",
+                    "unlock_at": None,
+                    "lock_at": None,
+                    "has_overrides": False,
+                },
+                {
+                    "id": 32,
+                    "name": "Ordinary assignment 07",
+                    "assignment_group_id": 1,
+                    "published": True,
+                    "due_at": "2026-09-28T05:00:00Z",
+                    "unlock_at": None,
+                    "lock_at": None,
+                    "has_overrides": False,
+                },
+            ])
+
+            result = audit_dates(snapshot, root)
+            report = json.loads(result.json_path.read_text(encoding="utf-8"))
+            codes = [item["code"] for item in report["issues"]]
+
+            self.assertIn("week_name_mismatch", codes)
+            self.assertIn("week_name_break", codes)
+
+            w07 = next(item for item in report["assignments"] if item["id"] == 30)
+            self.assertEqual(w07["declared_week_number"], 7)
+            self.assertEqual(w07["week_number"], 6)
+            self.assertIn("name says Week 7; date is Week 6", w07["issues"])
+
+            w15 = next(item for item in report["assignments"] if item["id"] == 31)
+            self.assertEqual(w15["declared_week_number"], 15)
+            self.assertIsNone(w15["week_number"])
+            self.assertEqual(w15["week_label"], "Thanksgiving Break")
+            self.assertIn("name says Week 15; due in Thanksgiving Break", w15["issues"])
+
+            ordinary = next(item for item in report["assignments"] if item["id"] == 32)
+            self.assertIsNone(ordinary["declared_week_number"])
+
+            text = result.markdown_path.read_text(encoding="utf-8")
+            self.assertIn("Name indicates Week 7", text)
+            self.assertIn("unnumbered Thanksgiving Break week", text)
+
     def test_runs_without_matching_institution_calendar(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
