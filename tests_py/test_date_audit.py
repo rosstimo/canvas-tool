@@ -98,6 +98,8 @@ class DateAuditTests(unittest.TestCase):
             self.assertEqual(result.dated_count, 2)
             self.assertEqual(result.undated_count, 1)
             self.assertEqual(report["summary"]["instructional_weeks"], 16)
+            self.assertEqual(report["semester_weeks"][0]["calendar_start"], "2026-08-23")
+            self.assertEqual(report["semester_weeks"][0]["calendar_end"], "2026-08-29")
             self.assertIn("no_class_day", codes)
             self.assertIn("missing_due_date", codes)
             self.assertIn("unlock_after_due", codes)
@@ -109,9 +111,13 @@ class DateAuditTests(unittest.TestCase):
             self.assertEqual(labor_day["date_local"], "September 7, 2026")
 
             text = result.markdown_path.read_text(encoding="utf-8")
-            self.assertIn("| Week | Day | Date | Notes |", text)
+            self.assertIn("First day of class: **Monday, August 24, 2026**", text)
+            self.assertIn("Last day of class: **Friday, December 18, 2026**", text)
+            self.assertIn("| Week | Date range (Sunday-Saturday) | Notes |", text)
+            self.assertIn("August 23-29, 2026", text)
             self.assertIn("Labor Day holiday", text)
             self.assertIn("Thanksgiving Break", text)
+            self.assertIn("| Week | Day | Date | Time | Assignment", text)
             self.assertIn("NO DUE DATE", text)
             self.assertIn("Module unlock dates", text)
 
