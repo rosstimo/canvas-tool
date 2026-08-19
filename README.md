@@ -23,7 +23,7 @@ The launcher runs the Python CLI through the repository's locked `uv` project. D
 uv run canvas-tool doctor 18637
 ```
 
-The Python runtime currently has **no third-party runtime dependencies**. The standard library handles HTTP, JSON, configuration, dates, comparison, duplicate detection, and CLI parsing. `uv.lock` and `.python-version` keep development environments reproducible.
+The Python runtime currently has **no third-party runtime dependencies**. The standard library handles HTTP, JSON, configuration, dates, comparison, duplicate detection, HTML/reference inspection, and CLI parsing. `uv.lock` and `.python-version` keep development environments reproducible.
 
 The older Bash implementation remains in `bin/` and `lib/` during the rewrite as a known-working reference implementation. New feature work should target the Python package under `src/canvas_tool/`.
 
@@ -92,32 +92,63 @@ Results are written beside the snapshot as:
 course-overview.md
 course-overview.json
 module-overrides.json
+assignment-overrides.json
 ```
 
-Module override snapshots deliberately do not retain specific student IDs or names. A student-targeted module is summarized only as a count.
+Module and assignment override snapshots deliberately do not retain specific student IDs or names. A student-targeted override is summarized only as a count.
 
-## Course audit
+## Comprehensive course audit
 
-`canvas-tool audit COURSE` is the compact exception report. It uses structured Canvas/calendar fields only and currently highlights:
+`canvas-tool audit COURSE` performs a fresh read-only recon and generates a **master audit plus specialized reports**. `course-overview.md` remains the at-a-glance course view; the audit suite goes much deeper without changing the overview format.
 
-- graded objects without due dates
-- due dates before the first class day or after the last class day
-- due dates during configured breaks or holidays
-- invalid unlock/due/lock ordering
-- differentiated assignment dates that deserve review
-- notable due-date clumps and strong due-time outliers
-- module unlock dates outside the course or during no-class periods
-- graded items returned by Canvas that are not represented in a module
-- recon endpoints that could not be retrieved
-
-It intentionally does **not** interpret names or titles. The full `course-overview.md` remains the primary at-a-glance view; the audit is only the shorter exception list.
-
-Results are written beside the snapshot as:
+The master report is:
 
 ```text
-course-audit.md
-course-audit.json
+comprehensive-audit.md
+comprehensive-audit.json
 ```
+
+It combines warnings/reviews from the specialized audits, the semester/date audit, and the duplicate-content audit. The master report also includes an API-coverage table so an unavailable endpoint is not mistaken for an empty Canvas feature.
+
+Specialized reports currently include:
+
+- `assignment-audit.md` - assignment groups, gradebook objects, points, grading type, due dates, submission types, module placement, peer review, and LTI/New Quiz classification
+- `assignment-override-audit.md` - differentiated **Assign To** targets and override dates, with specific-student targets retained only as counts
+- `module-audit.md` - module structure, prerequisites, completion requirements, publication state, item types, and captured content-reference integrity
+- `quiz-audit.md` - Classic Quizzes, New Quizzes, quiz settings, question/item counts, question types, and bank-backed New Quiz entries
+- `question-bank-audit.md` - Classic Question Banks and questions, Classic Quiz question groups/bank links, and New Quiz bank-backed items referenced by captured quizzes
+- `grading-audit.md` - assignment-group weighting, rubrics, grading standards, learning outcomes, grading periods, and late policy
+- `content-audit.md` - pages, files, folders, discussions, announcements, calendar events, and lightweight HTML/accessibility-review signals
+- `link-audit.md` - stale or missing internal Canvas links, cross-course links, and an inventory of external-link domains
+- `integration-audit.md` - navigation tabs, feature flags, external tools, LTI-backed assignments, module links, and LTI resource links
+- `migration-audit.md` - course-copy/import history, migration issues, and content-export history
+- `course-settings-audit.md` - course settings, sections, group categories/groups, blackout dates, and supporting course configuration
+
+Existing reports are also part of the master view:
+
+- `course-audit.md` - compact schedule/inventory exception report
+- `date-audit.md` - detailed semester/date audit
+- `duplicate-audit.md` - duplicate-content candidates
+- `summary.md` - recon inventory
+- `course-overview.md` - primary instructor-facing overview
+
+Findings are intentionally conservative:
+
+- **warning** means an objective structural/date conflict was detected
+- **review** means the configuration deserves a look but may be intentional
+- **observation** is inventory information and is not treated as an error
+
+Examples of objective/review checks include dates outside the course or during configured breaks, invalid unlock/due/lock ordering, missing internal Canvas targets, empty question banks/quizzes/modules, inconsistent question counts, failed imports/exports, active migration issues, odd grade weighting, rubric associations, duplicate candidates, differentiated assignment targets, and lightweight HTML signals such as images without an `alt` attribute.
+
+External URLs are inventoried but are not fetched by the audit. New Quiz item-bank reporting covers banks referenced by the captured quiz items; it does not claim to enumerate every item bank available to an instructor/account.
+
+Every generated Markdown report in a course snapshot is automatically linked from:
+
+```text
+snapshots/<canvas-host>/<course-id>/README.md
+```
+
+Each report also gets a **Report index** backlink.
 
 No Canvas content or dates are modified.
 
@@ -154,27 +185,32 @@ No Canvas dates are modified.
 
 ## Recon
 
-Recon intentionally avoids student rosters, enrollments, submissions, grades, quiz submissions, and discussion entries. The default output remains:
+Recon intentionally avoids student rosters, enrollments, submissions, grades, quiz submissions, discussion entries, group memberships, and other student-level records. The default output remains:
 
 ```text
 snapshots/<canvas-host>/<course-id>/
 ```
 
+The expanded recon captures course/settings/navigation data plus modules, assignments, Classic/New Quizzes, Classic Question Banks, pages, rubrics, outcomes, files/folders, sections, groups/group categories without memberships, external tools/LTI links, grading periods/late policy, blackout/calendar dates, and content migration/export history where Canvas permits access.
+
 Important files are:
 
-- `summary.md` - human-readable inventory
+- `README.md` - generated Markdown report index
+- `summary.md` - human-readable recon inventory
 - `manifest.json` - snapshot identity and capture metadata
 - `normalized.json` - structural/content representation for cross-semester comparison
 - `errors.json` - endpoints that were unavailable or denied
 - the remaining JSON files - sanitized API responses for Canvas resource types
 
+An unavailable endpoint is recorded rather than interpreted as an empty feature.
+
 Generated snapshots and comparisons are ignored by Git.
 
 ## Duplicate audit
 
-`canvas-tool duplicates COURSE` remains a separate specialized review tool. It audits normalized course content for duplicate candidates and does not modify Canvas.
+`canvas-tool duplicates COURSE` remains available as a separate specialized review tool. It audits normalized course content for duplicate candidates and does not modify Canvas. The comprehensive audit also runs this report automatically.
 
-The duplicate heuristic uses names/content similarity and therefore is intentionally **not** part of the convention-free course audit. Its findings are review candidates only, especially the lower-confidence similar-name category.
+The duplicate heuristic uses names/content similarity. Its findings are review candidates only, especially the lower-confidence similar-name category.
 
 Results are written beside the snapshot as:
 
@@ -193,7 +229,7 @@ Python tests use the standard library and require no real Canvas token:
 uv run python -m unittest discover -s tests_py -v
 ```
 
-The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, duplicate-audit classification/reporting, Sunday-Saturday semester week numbering, unnumbered break weeks, convention-free date auditing, FERPA-safe module override capture, course-overview joins, and the convention-free course audit.
+The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, duplicate-audit classification/reporting, Sunday-Saturday semester week numbering, unnumbered break weeks, convention-free date auditing, FERPA-safe module and assignment override capture, course-overview joins, report indexing, New Quiz identification, question-bank audit generation, migration archaeology, stale internal-link detection, and the comprehensive audit rollup.
 
 The Bash prototype tests remain under `tests/` while parity is being checked.
 
@@ -201,8 +237,8 @@ The Bash prototype tests remain under `tests/` while parity is being checked.
 
 The next major workflows are semester-rollover tools:
 
-- richer at-a-glance course inventory and consistency checks
-- date audit after Canvas import/shift
+- richer cross-semester comparison using the expanded recon data
+- date planning after Canvas import/shift
 - break-aware schedule planning for Spring Break vs. Thanksgiving
 - destination-course duplicate review and eventual cleanup plans
 - explicit dry-run plans before any write operations
