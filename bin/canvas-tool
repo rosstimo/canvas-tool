@@ -20,6 +20,7 @@ usage() {
 canvas-tool - Canvas LMS course inspection and recon
 
 Usage:
+  canvas-tool courses [search]
   canvas-tool doctor <course-id-or-url>
   canvas-tool inspect <course-id-or-url>
   canvas-tool recon <course-id-or-url> [output-directory]
@@ -29,6 +30,7 @@ Usage:
   canvas-tool version
 
 Examples:
+  canvas-tool courses RCET2265
   canvas-tool doctor https://isu.instructure.com/courses/18637
   canvas-tool inspect 18637
   canvas-tool recon https://isu.instructure.com/courses/18637
@@ -46,6 +48,41 @@ require_command() {
         printf 'Error: required command not found: %s\n' "$1" >&2
         return 1
     }
+}
+
+command_courses() {
+    local query="${1:-}" courses rows
+    load_canvas_env
+    require_command curl
+    require_command jq
+
+    courses="$(canvas_api_paginate \
+      '/api/v1/users/self/courses?include[]=term&state[]=unpublished&state[]=available&state[]=completed')"
+
+    rows="$(jq -r --arg q "$query" '
+      ($q | ascii_downcase) as $needle |
+      map(select(
+        ($needle == "") or
+        (((.name // "") | ascii_downcase) | contains($needle)) or
+        (((.course_code // "") | ascii_downcase) | contains($needle)) or
+        (((.sis_course_id // "") | ascii_downcase) | contains($needle)) or
+        (((.term.name // "") | ascii_downcase) | contains($needle))
+      )) |
+      sort_by(.term.end_at // .end_at // .start_at // "") | reverse |
+      .[] |
+      [
+        (.id | tostring),
+        (.course_code // ""),
+        (.term.name // ""),
+        (.workflow_state // ""),
+        (.name // "")
+      ] | @tsv
+    ' <<<"$courses")"
+
+    printf 'ID\tCOURSE CODE\tTERM\tSTATE\tNAME\n'
+    if [[ -n "$rows" ]]; then
+        printf '%s\n' "$rows"
+    fi
 }
 
 command_doctor() {
@@ -129,6 +166,10 @@ main() {
             ;;
         version|--version)
             printf 'canvas-tool %s\n' "$VERSION"
+            ;;
+        courses)
+            (($# <= 1)) || { usage >&2; return 2; }
+            command_courses "${1:-}"
             ;;
         doctor)
             (($# == 1)) || { usage >&2; return 2; }
