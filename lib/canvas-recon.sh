@@ -68,28 +68,31 @@ recon_sanitize() {
 
 recon_normalize() {
     local out="$1"
+
+    # Read snapshot JSON directly from files. Do not pass whole course/page data
+    # through --argjson: large courses can exceed the OS argv size limit.
     jq -n \
-      --argjson course "$(cat "$out/course.json")" \
-      --argjson settings "$(cat "$out/settings.json")" \
-      --argjson tabs "$(cat "$out/tabs.json")" \
-      --argjson modules "$(cat "$out/modules.json")" \
-      --argjson module_items "$(cat "$out/module-items.json")" \
-      --argjson groups "$(cat "$out/assignment-groups.json")" \
-      --argjson assignments "$(cat "$out/assignments.json")" \
-      --argjson classic_quizzes "$(cat "$out/classic-quizzes.json")" \
-      --argjson classic_questions "$(cat "$out/classic-quiz-questions.json")" \
-      --argjson new_quizzes "$(cat "$out/new-quizzes.json")" \
-      --argjson new_items "$(cat "$out/new-quiz-items.json")" \
-      --argjson pages "$(cat "$out/pages.json")" \
-      --argjson rubrics "$(cat "$out/rubrics.json")" \
-      --argjson discussions "$(cat "$out/discussions.json")" \
-      --argjson announcements "$(cat "$out/announcements.json")" \
-      --argjson files "$(cat "$out/files.json")" \
-      --argjson folders "$(cat "$out/folders.json")" \
-      --argjson features "$(cat "$out/features.json")" \
-      --argjson grading_standards "$(cat "$out/grading-standards.json")" \
-      --argjson outcome_links "$(cat "$out/outcome-links.json")" \
-      --argjson calendar_events "$(cat "$out/calendar-events.json")" \
+      --slurpfile course "$out/course.json" \
+      --slurpfile settings "$out/settings.json" \
+      --slurpfile tabs "$out/tabs.json" \
+      --slurpfile modules "$out/modules.json" \
+      --slurpfile module_items "$out/module-items.json" \
+      --slurpfile groups "$out/assignment-groups.json" \
+      --slurpfile assignments "$out/assignments.json" \
+      --slurpfile classic_quizzes "$out/classic-quizzes.json" \
+      --slurpfile classic_questions "$out/classic-quiz-questions.json" \
+      --slurpfile new_quizzes "$out/new-quizzes.json" \
+      --slurpfile new_items "$out/new-quiz-items.json" \
+      --slurpfile pages "$out/pages.json" \
+      --slurpfile rubrics "$out/rubrics.json" \
+      --slurpfile discussions "$out/discussions.json" \
+      --slurpfile announcements "$out/announcements.json" \
+      --slurpfile files "$out/files.json" \
+      --slurpfile folders "$out/folders.json" \
+      --slurpfile features "$out/features.json" \
+      --slurpfile grading_standards "$out/grading-standards.json" \
+      --slurpfile outcome_links "$out/outcome-links.json" \
+      --slurpfile calendar_events "$out/calendar-events.json" \
       -f "$CANVAS_TOOLS_ROOT/lib/canvas-normalize.jq" >"$out/normalized.json"
 }
 
@@ -153,23 +156,98 @@ canvas_recon() {
     recon_get "$out" "$errors" outcome-links "/api/v1/courses/$id/outcome_group_links?outcome_style=full&outcome_group_style=full" collection
     recon_get "$out" "$errors" calendar-events "/api/v1/calendar_events?context_codes[]=course_$id&all_events=true" collection
 
-    recon_sanitize "$out"; recon_normalize "$out"
+    recon_sanitize "$out" || return 1
+    recon_normalize "$out" || {
+        printf 'Error: failed to normalize recon for course %s\n' "$id" >&2
+        return 1
+    }
+    jq -e . "$out/normalized.json" >/dev/null || {
+        printf 'Error: normalized recon is not valid JSON for course %s\n' "$id" >&2
+        return 1
+    }
+
     jq --argjson error_count "$(jq length "$errors")" '. + {error_count:$error_count, errors_file:"errors.json"}' "$out/manifest.json" >"$out/manifest.json.tmp"
     mv "$out/manifest.json.tmp" "$out/manifest.json"
     recon_summary "$out"
     printf '\nRecon written to %s\n' "$out" >&2; printf '%s\n' "$out"
 }
 
-canvas_recon_diff() {
-    local a="$1" b="$2" da db ia ib dir stamp file
-    da="$(canvas_recon "$a")" || return 1; db="$(canvas_recon "$b")" || return 1
-    ia="$(jq -r .course_id "$da/manifest.json")"; ib="$(jq -r .course_id "$db/manifest.json")"
-    dir="$CANVAS_TOOLS_ROOT/comparisons/$ia-vs-$ib"; mkdir -p "$dir"; stamp="$(date -u +'%Y%m%dT%H%M%SZ')"; file="$dir/$stamp.diff"
+canvas_compare_snapshots() {
+    local da="$1" db="$2"
+    local ia ib na nb ca cb dir stamp diff_file summary_file changed
+
+    ia="$(jq -r .course_id "$da/manifest.json")"
+    ib="$(jq -r .course_id "$db/manifest.json")"
+    na="$(jq -r .course_name "$da/manifest.json")"
+    nb="$(jq -r .course_name "$db/manifest.json")"
+    ca="$(jq -r '.course_code // ""' "$da/manifest.json")"
+    cb="$(jq -r '.course_code // ""' "$db/manifest.json")"
+
+    dir="$CANVAS_TOOLS_ROOT/comparisons/$ia-vs-$ib"
+    mkdir -p "$dir"
+    stamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+    diff_file="$dir/$stamp.diff"
+    summary_file="$dir/$stamp-summary.md"
+
+    printf 'Course comparison\n'
+    printf '  A: %s (%s, %s)\n' "$na" "$ca" "$ia"
+    printf '  B: %s (%s, %s)\n' "$nb" "$cb" "$ib"
+
     if cmp -s "$da/normalized.json" "$db/normalized.json"; then
-      printf 'No structural/content differences after normalization.\n' | tee "$file"
-    else
-      diff -u --label "course-$ia/normalized.json" --label "course-$ib/normalized.json" "$da/normalized.json" "$db/normalized.json" >"$file" || true
-      cat "$file"
+        printf 'No structural/content differences after normalization.\n' >"$diff_file"
+        printf '  Result: no structural/content differences after normalization\n'
+        printf '  Detailed diff: %s\n' "$diff_file"
+        return 0
     fi
-    printf 'Comparison saved to %s\n' "$file" >&2
+
+    diff -u \
+      --label "course-$ia/normalized.json" \
+      --label "course-$ib/normalized.json" \
+      "$da/normalized.json" "$db/normalized.json" >"$diff_file" || true
+
+    changed="$(jq -nr \
+      --slurpfile a "$da/normalized.json" \
+      --slurpfile b "$db/normalized.json" '
+        $a[0] as $left |
+        $b[0] as $right |
+        ((($left | keys_unsorted) + ($right | keys_unsorted)) | unique[]) as $key |
+        select($left[$key] != $right[$key]) |
+        if (($left[$key] | type) == "array" and ($right[$key] | type) == "array") then
+          [$key, ($left[$key] | length), ($right[$key] | length)] | @tsv
+        else
+          [$key, "-", "-"] | @tsv
+        end
+      ')"
+
+    {
+        printf '# Canvas course comparison\n\n'
+        printf '- A: **%s** (`%s`, ID `%s`)\n' "$na" "$ca" "$ia"
+        printf '- B: **%s** (`%s`, ID `%s`)\n\n' "$nb" "$cb" "$ib"
+        printf '## Changed areas\n\n'
+        printf '| Area | A count | B count |\n|---|---:|---:|\n'
+        while IFS=$'\t' read -r area old_count new_count; do
+            [[ -n "$area" ]] || continue
+            printf '| `%s` | %s | %s |\n' "$area" "$old_count" "$new_count"
+        done <<<"$changed"
+        printf '\nDetailed unified diff: `%s`\n' "$diff_file"
+    } >"$summary_file"
+
+    printf '  Changed areas:\n'
+    while IFS=$'\t' read -r area old_count new_count; do
+        [[ -n "$area" ]] || continue
+        if [[ "$old_count" == '-' ]]; then
+            printf '    - %s\n' "$area"
+        else
+            printf '    - %-24s %s -> %s\n' "$area" "$old_count" "$new_count"
+        fi
+    done <<<"$changed"
+    printf '  Summary: %s\n' "$summary_file"
+    printf '  Detailed diff: %s\n' "$diff_file"
+}
+
+canvas_recon_diff() {
+    local a="$1" b="$2" da db
+    da="$(canvas_recon "$a")" || return 1
+    db="$(canvas_recon "$b")" || return 1
+    canvas_compare_snapshots "$da" "$db"
 }
