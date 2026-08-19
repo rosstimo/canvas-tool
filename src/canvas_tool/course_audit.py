@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .overview import build_overview
+from .report_index import refresh_report_index
 from .schedule_audit import audit_dates
 
 
@@ -62,8 +63,7 @@ def audit_course(snapshot: Path, root: Path, calendar_path: Path | None = None) 
         f"- Course: **{manifest.get('course_name', 'unnamed course')}**",
         f"- Course code: `{manifest.get('course_code', '')}`",
         f"- Canvas course ID: `{manifest.get('course_id', '')}`",
-        "- Mode: **read-only**.",
-        "- Audit logic: **structured Canvas/calendar fields only**. Names and titles are not interpreted.",
+        "- Mode: **read-only**. No Canvas content is changed.",
         "",
         "## Summary",
         "",
@@ -101,11 +101,12 @@ def audit_course(snapshot: Path, root: Path, calendar_path: Path | None = None) 
         "",
         "## Detailed reports",
         "",
-        f"- Full course overview: `{overview_result.markdown_path}`",
-        f"- Date audit: `{date_result.markdown_path}`",
+        f"- [Full course overview]({overview_result.markdown_path.name})",
+        f"- [Date audit]({date_result.markdown_path.name})",
         "",
     ])
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    refresh_report_index(snapshot)
 
     return CourseAuditResult(
         markdown_path=markdown_path,
