@@ -13,9 +13,11 @@ from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
 from .course_audit import audit_course
-from .date_audit import audit_dates
 from .duplicates import audit_snapshot
+from .module_overrides import capture_module_overrides
+from .overview import build_overview
 from .recon import Recon
+from .schedule_audit import audit_dates
 from .semester import build_semester_weeks, format_day, parse_date, render_week_text
 
 
@@ -109,17 +111,39 @@ def command_duplicates(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare_course_view(client: CanvasClient, course: str, calendar_arg: str | None) -> tuple[Path, Path | None]:
+    root = project_root()
+    snapshot = Recon(client, root).run(course).path
+    capture_module_overrides(client, snapshot)
+    calendar = Path(calendar_arg).expanduser().resolve() if calendar_arg else None
+    audit_dates(snapshot, root, calendar)
+    return snapshot, calendar
+
+
+def command_overview(args: argparse.Namespace) -> int:
+    _config, client = client_from_config()
+    snapshot, _calendar = _prepare_course_view(client, args.course, args.calendar)
+    result = build_overview(snapshot)
+    print("Course overview")
+    print(f"  Modules:                       {result.module_count}")
+    print(f"  Graded items:                  {result.graded_item_count}")
+    print(f"  Graded items not in modules:   {result.unplaced_graded_item_count}")
+    print(f"  Schedule/availability flags:   {result.schedule_issue_count}")
+    print("  Canvas changes:                none (read-only)")
+    print(f"  Report: {result.markdown_path}")
+    print(f"  JSON:   {result.json_path}")
+    return 0
+
+
 def command_audit(args: argparse.Namespace) -> int:
     _config, client = client_from_config()
-    root = project_root()
-    snapshot = Recon(client, root).run(args.course).path
-    calendar = Path(args.calendar).expanduser().resolve() if args.calendar else None
-    result = audit_course(snapshot, root, calendar)
+    snapshot, calendar = _prepare_course_view(client, args.course, args.calendar)
+    result = audit_course(snapshot, project_root(), calendar)
     print("Course audit")
-    print(f"  Weekly structure issues:    {result.structure_issue_count}")
-    print(f"  Date/schedule issues:       {result.date_issue_count}")
-    print(f"  Duplicate candidates:       {result.duplicate_count}")
-    print("  Canvas changes:             none (read-only)")
+    print(f"  Schedule/availability flags:   {result.schedule_issue_count}")
+    print(f"  Graded items not in modules:   {result.unplaced_graded_item_count}")
+    print(f"  Recon retrieval errors:        {result.recon_error_count}")
+    print("  Canvas changes:                none (read-only)")
     print(f"  Report: {result.markdown_path}")
     print(f"  JSON:   {result.json_path}")
     return 0
@@ -178,7 +202,13 @@ def parser() -> argparse.ArgumentParser:
         recon = sub.add_parser(name, help="capture a sanitized course snapshot"); recon.add_argument("course"); recon.add_argument("output", nargs="?"); recon.set_defaults(func=command_recon)
     diff = sub.add_parser("diff", help="recon and compare two courses"); diff.add_argument("course_a"); diff.add_argument("course_b"); diff.set_defaults(func=command_diff)
     duplicates = sub.add_parser("duplicates", help="recon a course and report duplicate-content candidates (read-only)"); duplicates.add_argument("course"); duplicates.set_defaults(func=command_duplicates)
-    audit = sub.add_parser("audit", help="recon a course and run structural, date, and duplicate checks (read-only)")
+
+    overview = sub.add_parser("overview", help="show the course at a glance without interpreting names or titles")
+    overview.add_argument("course")
+    overview.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
+    overview.set_defaults(func=command_overview)
+
+    audit = sub.add_parser("audit", help="run convention-free schedule and inventory checks (read-only)")
     audit.add_argument("course")
     audit.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
     audit.set_defaults(func=command_audit)
@@ -203,7 +233,7 @@ def parser() -> argparse.ArgumentParser:
         help="unnumbered break week; break start/end dates use YYYY-MM-DD; repeat as needed",
     )
     weeks.set_defaults(func=command_dates_weeks)
-    dates_audit = dates_sub.add_parser("audit", help="recon a course and audit assignment dates (read-only)")
+    dates_audit = dates_sub.add_parser("audit", help="recon a course and audit structured dates without interpreting names (read-only)")
     dates_audit.add_argument("course")
     dates_audit.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
     dates_audit.set_defaults(func=command_dates_audit)
