@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .date_audit import find_calendar
-from .semester import render_week_table, semester_bounds, week_for_date, weeks_from_calendar
+from .calendar_config import find_calendar
+from .semester import render_week_table, semester_bounds, week_for_date, week_to_dict, weeks_from_calendar
 
 
 @dataclass(frozen=True)
@@ -54,8 +54,8 @@ def _local(value: Any, zone: ZoneInfo) -> datetime | None:
 def _format_local(value: datetime | None) -> str:
     if value is None:
         return ""
-    hour = value.strftime("%I:%M %p").lstrip("0")
-    return f"{value:%A, %B} {value.day}, {value.year} {hour} {value.tzname() or ''}".strip()
+    time_text = value.strftime("%I:%M %p").lstrip("0")
+    return f"{value:%A, %B} {value.day}, {value.year} {time_text} {value.tzname() or ''}".strip()
 
 
 def _format_date(value: datetime | None) -> str:
@@ -100,6 +100,13 @@ def _issue(
     return result
 
 
+def _week_fields(weeks: list[Any], day: date) -> tuple[int | None, str, str]:
+    week = week_for_date(weeks, day) if weeks else None
+    if week is None:
+        return None, "", ""
+    return week.week_number, week.label, week.kind
+
+
 def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -> DateAuditResult:
     """Audit structured Canvas dates without interpreting arbitrary names or titles."""
     snapshot = snapshot.resolve()
@@ -116,14 +123,12 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
 
     start_date: date | None = None
     end_date: date | None = None
-    semester_weeks = []
-    break_periods: list[dict[str, Any]] = []
+    semester_weeks: list[Any] = []
     holiday_periods: list[dict[str, Any]] = []
     special_periods: list[dict[str, Any]] = []
     if calendar:
         start_date, end_date = semester_bounds(calendar)
         semester_weeks = weeks_from_calendar(calendar)
-        break_periods = list(calendar.get("break_weeks") or [])
         holiday_periods = list(calendar.get("holidays") or calendar.get("no_class_periods") or [])
         special_periods = list(calendar.get("special_periods") or [])
 
@@ -154,10 +159,7 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             dated_days[day].append(assignment)
             due_times[due.strftime("%H:%M")] += 1
             weekdays[due.strftime("%A")] += 1
-            semester_week = week_for_date(semester_weeks, day) if semester_weeks else None
-            if semester_week is not None:
-                week_number = semester_week.week_number
-                week_label = semester_week.label
+            week_number, week_label, week_kind = _week_fields(semester_weeks, day)
 
             if start_date and day < start_date:
                 issues.append(_issue("before_term", "warning", f"Due {_format_local(due)}, before the first class day on {start_date.isoformat()}.", name, assignment_id))
@@ -166,9 +168,13 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
                 issues.append(_issue("after_term", "warning", f"Due {_format_local(due)}, after the last class day on {end_date.isoformat()}.", name, assignment_id))
                 row_issues.append("after last class")
 
-            for period in break_periods + holiday_periods:
+            if week_kind == "break":
+                issues.append(_issue("break_week", "warning", f"Due {_format_local(due)} during the unnumbered {week_label} week.", name, assignment_id))
+                row_issues.append(week_label)
+
+            for period in holiday_periods:
                 if _date_range_contains(period, day):
-                    period_name = str(period.get("name") or "no-class period")
+                    period_name = str(period.get("name") or "no-class day")
                     issues.append(_issue("no_class_day", "warning", f"Due {_format_local(due)} during {period_name}.", name, assignment_id))
                     row_issues.append(period_name)
             for period in special_periods:
@@ -233,30 +239,32 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
     for module in modules:
         if not isinstance(module, dict):
             continue
+        module_id = module.get("id")
+        module_name = str(module.get("name") or f"Module {module_id or '?'}")
         unlock = _local(module.get("unlock_at"), zone)
-        module_name = str(module.get("name") or f"Module {module.get('id') or '?'}")
         module_issues: list[str] = []
         week_number: int | None = None
         week_label = ""
         if unlock is not None:
             day = unlock.date()
-            semester_week = week_for_date(semester_weeks, day) if semester_weeks else None
-            if semester_week is not None:
-                week_number = semester_week.week_number
-                week_label = semester_week.label
+            week_number, week_label, week_kind = _week_fields(semester_weeks, day)
             if start_date and day < start_date:
-                issues.append(_issue("module_unlock_before_term", "warning", f"Unlocks {_format_local(unlock)}, before the first class day on {start_date.isoformat()}.", module=module_name, module_id=module.get("id")))
+                issues.append(_issue("module_unlock_before_term", "warning", f"Unlocks {_format_local(unlock)}, before the first class day on {start_date.isoformat()}.", module=module_name, module_id=module_id))
                 module_issues.append("before first class")
             if end_date and day > end_date:
-                issues.append(_issue("module_unlock_after_term", "warning", f"Unlocks {_format_local(unlock)}, after the last class day on {end_date.isoformat()}.", module=module_name, module_id=module.get("id")))
+                issues.append(_issue("module_unlock_after_term", "warning", f"Unlocks {_format_local(unlock)}, after the last class day on {end_date.isoformat()}.", module=module_name, module_id=module_id))
                 module_issues.append("after last class")
-            for period in break_periods + holiday_periods:
+            if week_kind == "break":
+                issues.append(_issue("module_unlock_break_week", "warning", f"Unlocks {_format_local(unlock)} during the unnumbered {week_label} week.", module=module_name, module_id=module_id))
+                module_issues.append(week_label)
+            for period in holiday_periods:
                 if _date_range_contains(period, day):
-                    period_name = str(period.get("name") or "no-class period")
-                    issues.append(_issue("module_unlock_no_class_day", "warning", f"Unlocks {_format_local(unlock)} during {period_name}.", module=module_name, module_id=module.get("id")))
+                    period_name = str(period.get("name") or "no-class day")
+                    issues.append(_issue("module_unlock_no_class_day", "warning", f"Unlocks {_format_local(unlock)} during {period_name}.", module=module_name, module_id=module_id))
                     module_issues.append(period_name)
+
         module_rows.append({
-            "id": module.get("id"),
+            "id": module_id,
             "name": module_name,
             "published": module.get("published"),
             "week_number": week_number,
@@ -269,24 +277,24 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             "issues": module_issues,
         })
 
-    rows.sort(key=lambda row: ((row.get("_due") is None), row.get("_due") or datetime.max.replace(tzinfo=zone), str(row.get("name"))))
+    rows.sort(key=lambda row: (row.get("_due") is None, row.get("_due") or datetime.max.replace(tzinfo=zone), str(row.get("name"))))
     for row in rows:
         row.pop("_due", None)
 
     dated_rows = [row for row in rows if row.get("due_at")]
-    largest_gap: dict[str, Any] | None = None
-    unique_dates = sorted({date.fromisoformat(str(row["date_local_iso"])) for row in []})
     due_dates = sorted({(_local(row.get("due_at"), zone) or datetime.min.replace(tzinfo=zone)).date() for row in dated_rows})
+    largest_gap: dict[str, Any] | None = None
     if len(due_dates) >= 2:
         gaps = [(right - left).days for left, right in zip(due_dates, due_dates[1:])]
-        if gaps:
-            index = max(range(len(gaps)), key=gaps.__getitem__)
-            largest_gap = {"days": gaps[index], "from": due_dates[index].isoformat(), "to": due_dates[index + 1].isoformat()}
+        index = max(range(len(gaps)), key=gaps.__getitem__)
+        largest_gap = {"days": gaps[index], "from": due_dates[index].isoformat(), "to": due_dates[index + 1].isoformat()}
 
+    instructional_weeks = max((week.week_number or 0 for week in semester_weeks), default=0)
     summary = {
         "assignments": len(rows),
         "dated": len(dated_rows),
         "missing_due_date": len(rows) - len(dated_rows),
+        "instructional_weeks": instructional_weeks,
         "issue_count": len(issues),
         "warnings": sum(1 for item in issues if item.get("severity") == "warning"),
         "reviews": sum(1 for item in issues if item.get("severity") == "review"),
@@ -297,12 +305,14 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
     }
 
     report = {
-        "schema_version": 4,
+        "schema_version": 5,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
         "read_only": True,
+        "logic": "structured_fields_only",
         "calendar": calendar,
+        "semester_weeks": [week_to_dict(week) for week in semester_weeks],
         "summary": summary,
         "issues": issues,
         "assignments": rows,
@@ -331,6 +341,8 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             "",
             render_week_table(semester_weeks),
         ])
+    else:
+        lines.append("- Calendar: **none matched**")
 
     lines.extend(["", "## Attention needed", ""])
     if issues:
@@ -353,9 +365,9 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         if row.get("week_number") is None and row.get("week_label"):
             week = str(row.get("week_label"))
         if not row.get("due_at"):
-            lines.append(f"|  |  | **NO DUE DATE** |  | {row['name']} | {row['assignment_group']} | {row.get('points_possible') or ''} | {row.get('published')} | {'; '.join(row.get('issues') or [])} |")
+            lines.append(f"|  |  | **NO DUE DATE** |  | {row['name']} | {row['assignment_group']} | {row.get('points_possible') if row.get('points_possible') is not None else ''} | {row.get('published')} | {'; '.join(row.get('issues') or [])} |")
         else:
-            lines.append(f"| {week} | {row['weekday']} | {row['date_local']} | {row['time_local']} | {row['name']} | {row['assignment_group']} | {row.get('points_possible') or ''} | {row.get('published')} | {'; '.join(row.get('issues') or [])} |")
+            lines.append(f"| {week} | {row['weekday']} | {row['date_local']} | {row['time_local']} | {row['name']} | {row['assignment_group']} | {row.get('points_possible') if row.get('points_possible') is not None else ''} | {row.get('published')} | {'; '.join(row.get('issues') or [])} |")
 
     lines.extend(["", "## Module unlock dates", ""])
     dated_modules = [row for row in module_rows if row.get("unlock_at")]
@@ -372,7 +384,7 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
                 week = str(row.get("week_label"))
             lines.append(f"| {week} | {row['weekday']} | {row['date_local']} | {row['time_local']} | {row['name']} | {row.get('published')} | {'; '.join(row.get('issues') or [])} |")
 
-    markdown_path.write_text("\n".join(line for line in lines if line is not None) + "\n", encoding="utf-8")
+    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return DateAuditResult(
         markdown_path=markdown_path,
         json_path=json_path,
