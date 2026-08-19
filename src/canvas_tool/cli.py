@@ -12,6 +12,7 @@ from .api import CanvasApiError, CanvasClient
 from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
+from .duplicates import audit_snapshot
 from .recon import Recon
 
 
@@ -91,6 +92,20 @@ def command_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_duplicates(args: argparse.Namespace) -> int:
+    _config, client = client_from_config()
+    snapshot = Recon(client, project_root()).run(args.course).path
+    result = audit_snapshot(snapshot)
+    print("Duplicate content audit")
+    print(f"  High-confidence candidates: {result.high_confidence}")
+    print(f"  Same-name review items:     {result.review}")
+    print(f"  Similar-name candidates:    {result.similar_names}")
+    print("  Canvas changes:             none (read-only)")
+    print(f"  Report: {result.markdown_path}")
+    print(f"  JSON:   {result.json_path}")
+    return 0
+
+
 def command_api(args: argparse.Namespace) -> int:
     _config, client = client_from_config()
     value = client.paginate(args.target) if args.method.upper() == "GET" and args.paginate else client.request_json(args.method.upper(), args.target)
@@ -108,6 +123,7 @@ def parser() -> argparse.ArgumentParser:
     for name in ("recon", "snapshot"):
         recon = sub.add_parser(name, help="capture a sanitized course snapshot"); recon.add_argument("course"); recon.add_argument("output", nargs="?"); recon.set_defaults(func=command_recon)
     diff = sub.add_parser("diff", help="recon and compare two courses"); diff.add_argument("course_a"); diff.add_argument("course_b"); diff.set_defaults(func=command_diff)
+    duplicates = sub.add_parser("duplicates", help="recon a course and report duplicate-content candidates (read-only)"); duplicates.add_argument("course"); duplicates.set_defaults(func=command_duplicates)
     api = sub.add_parser("api", help="low-level Canvas API escape hatch"); api.add_argument("method"); api.add_argument("target"); api.add_argument("--paginate", action="store_true", help="follow Canvas pagination for GET collections"); api.set_defaults(func=command_api)
     return p
 
