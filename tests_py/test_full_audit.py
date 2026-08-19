@@ -52,7 +52,7 @@ class FullAuditTests(unittest.TestCase):
 
             result = build_full_audit(snapshot)
 
-            self.assertEqual(len(result.report_paths), 11)
+            self.assertEqual(len(result.report_paths), 12)
             self.assertGreaterEqual(result.warning_count, 1)
             self.assertGreaterEqual(result.review_count, 1)
 
@@ -61,6 +61,7 @@ class FullAuditTests(unittest.TestCase):
             self.assertIn("[Canvas date audit](date-audit.md)", text)
             self.assertIn("[Duplicate content audit](duplicate-audit.md)", text)
             self.assertIn("[Assignment Assign To and override audit](assignment-override-audit.md)", text)
+            self.assertIn("[Quiz question audit](question-audit.md)", text)
             self.assertIn("[Link and internal-reference audit](link-audit.md)", text)
             self.assertIn("Due before the first class day", text)
             self.assertIn("same-name records with the same normalized content", text)
@@ -68,6 +69,7 @@ class FullAuditTests(unittest.TestCase):
             index = (snapshot / "README.md").read_text(encoding="utf-8")
             self.assertIn("[Comprehensive course audit](comprehensive-audit.md)", index)
             self.assertIn("[Assignment Assign To and override audit](assignment-override-audit.md)", index)
+            self.assertIn("[Quiz question audit](question-audit.md)", index)
             self.assertIn("[Link and internal-reference audit](link-audit.md)", index)
 
 
