@@ -12,6 +12,7 @@ Development has moved to Python 3.13 with `uv` for reproducible environments. Th
 ./canvas-tool recon 18637
 ./canvas-tool diff 11657 18637
 ./canvas-tool duplicates 18637
+./canvas-tool dates audit 18637
 ```
 
 The launcher runs the Python CLI through the repository's locked `uv` project. Direct `uv` use also works:
@@ -45,6 +46,8 @@ canvas-tool recon <course-id-or-url> [output-directory]
 canvas-tool snapshot <course-id-or-url> [output-directory]
 canvas-tool diff <course-a-id-or-url> <course-b-id-or-url>
 canvas-tool duplicates <course-id-or-url>
+canvas-tool dates weeks <FIRST_CLASS_YYYY-MM-DD> <LAST_CLASS_YYYY-MM-DD> [--break NAME START_YYYY-MM-DD END_YYYY-MM-DD]
+canvas-tool dates audit <course-id-or-url> [--calendar calendar.json]
 canvas-tool api <METHOD> <path-or-url> [--paginate]
 ```
 
@@ -57,6 +60,35 @@ https://isu.instructure.com/courses/17600
 ```
 
 A URL must match `CANVAS_BASE_URL` before credentials are sent.
+
+## Semester weeks and date audit
+
+`canvas-tool dates weeks` builds a compact semester reference from the first and last class days. **All command-line dates use `YYYY-MM-DD`**, for example `2026-08-24`.
+
+Weeks run **Sunday through Saturday**. The first and last class days are called out separately. A break supplied with `--break` remains visible in the sequence but has no instructional week number, and numbering resumes after the break.
+
+Example:
+
+```bash
+./canvas-tool dates weeks 2026-08-24 2026-12-18 \
+  --break "Thanksgiving Break" 2026-11-23 2026-11-27
+```
+
+`canvas-tool dates audit COURSE` performs a fresh read-only recon and checks Canvas dates against the matched semester calendar. The report uses:
+
+- a compact `Week | Sunday-Saturday date range | Notes` semester reference
+- `Week | Day | Date | Time` for assignment due dates
+- the same `Week | Day | Date | Time` convention for module unlock dates
+- flags for missing dates, dates during breaks/holidays, bad availability ordering, differentiated-date assignments, due-date clumps, and strong due-time outliers
+
+Results are written beside the snapshot as:
+
+```text
+date-audit.md
+date-audit.json
+```
+
+No Canvas dates are modified.
 
 ## Recon
 
@@ -103,7 +135,7 @@ Python tests use the standard library and require no real Canvas token:
 uv run python -m unittest discover -s tests_py -v
 ```
 
-The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, and duplicate-audit classification/reporting.
+The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, duplicate-audit classification/reporting, Sunday-Saturday semester week numbering, unnumbered break weeks, and date-audit reporting.
 
 The Bash prototype tests remain under `tests/` while parity is being checked.
 
