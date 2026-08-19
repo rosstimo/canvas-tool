@@ -9,6 +9,7 @@ from typing import Any
 from .assignment_override_audit import audit_assignment_overrides
 from .audit_suite import build_audit_suite
 from .link_audit import audit_links
+from .question_audit import audit_questions
 from .report_index import refresh_report_index
 
 
@@ -110,12 +111,13 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
 
     suite = build_audit_suite(snapshot)
     override_result = audit_assignment_overrides(snapshot)
+    question_result = audit_questions(snapshot)
     link_result = audit_links(snapshot)
 
     suite_payload = _load(snapshot / "comprehensive-audit.json", {})
     findings = [dict(item, source_report=str(item.get("source_report") or "specialized audit")) for item in (suite_payload.get("findings") or []) if isinstance(item, dict)]
 
-    for path in (override_result.json_path, link_result.json_path):
+    for path in (override_result.json_path, question_result.json_path, link_result.json_path):
         payload = _load(path, {})
         source_report = path.with_suffix(".md").name
         for item in payload.get("findings") or []:
@@ -146,7 +148,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     for path in suite.report_paths:
         if path.is_file():
             reports.append(_report_entry(path, "Specialized audit"))
-    for path in (override_result.markdown_path, link_result.markdown_path):
+    for path in (override_result.markdown_path, question_result.markdown_path, link_result.markdown_path):
         if path.is_file():
             reports.append(_report_entry(path, "Specialized audit"))
 
@@ -154,7 +156,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     reports = [item for item in reports if not (item["markdown"] in seen or seen.add(item["markdown"]))]
 
     summary = {
-        "specialized_audit_reports": len(suite.report_paths) + 2,
+        "specialized_audit_reports": len(suite.report_paths) + 3,
         "warnings": counts.get("warning", 0),
         "reviews": counts.get("review", 0),
         "observations": counts.get("observation", 0),
@@ -186,6 +188,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
             "New Quiz item-bank coverage includes banks referenced by captured New Quiz items and does not claim to enumerate every item bank accessible to the instructor or account.",
             "External URLs are inventoried but are not fetched or network-validated by the link audit.",
             "HTML accessibility-review signals are structural cues only and do not replace an accessibility checker or human review.",
+            "Question-level scoring checks are limited to question types whose answer-key meaning is clear from the captured API structure; unusual does not automatically mean wrong.",
         ],
     }
 
@@ -250,7 +253,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
 
     refresh_report_index(snapshot)
 
-    report_paths = tuple(suite.report_paths) + (override_result.markdown_path, link_result.markdown_path)
+    report_paths = tuple(suite.report_paths) + (override_result.markdown_path, question_result.markdown_path, link_result.markdown_path)
     return FullAuditResult(
         comprehensive_path=markdown_path,
         report_paths=report_paths,
