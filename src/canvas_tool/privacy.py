@@ -13,9 +13,16 @@ _EXTRA_PRIVATE_KEYS = {
     "student_ids",
     "user_ids",
     "member_ids",
+    "user_id",
+    "sis_user_id",
+    "login_id",
+    "email",
     "users",
     "members",
     "invitees",
+    "author_id",
+    "created_by",
+    "updated_by",
 }
 
 
