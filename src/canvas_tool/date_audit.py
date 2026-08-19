@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -86,6 +87,14 @@ def _date_range_contains(period: dict[str, Any], day: date) -> bool:
     except (KeyError, ValueError):
         return False
     return start <= day <= end
+
+
+def _declared_week_number(name: str) -> int | None:
+    match = re.match(r"^\s*(?:w|week)\s*0*(\d{1,2})(?=\b|\s*[-:])", name, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if value > 0 else None
 
 
 def _load_calendar_file(path: Path) -> dict[str, Any]:
@@ -178,6 +187,7 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             continue
         assignment_id = assignment.get("id")
         name = str(assignment.get("name") or f"Assignment {assignment_id or '?'}")
+        declared_week = _declared_week_number(name)
         due = _local(assignment.get("due_at"), zone)
         unlock = _local(assignment.get("unlock_at"), zone)
         lock = _local(assignment.get("lock_at"), zone)
@@ -199,6 +209,21 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             if semester_week is not None:
                 week_number = semester_week.week_number
                 week_label = semester_week.label
+
+                if declared_week is not None:
+                    if semester_week.kind == "break":
+                        message = (
+                            f"Name indicates Week {declared_week}, but due {_format_local(due)} falls in "
+                            f"the unnumbered {semester_week.label} week."
+                        )
+                        issues.append(_issue("week_name_break", "warning", message, name, assignment_id))
+                        row_issues.append(f"name says Week {declared_week}; due in {semester_week.label}")
+                    elif week_number is not None and declared_week != week_number:
+                        message = (
+                            f"Name indicates Week {declared_week}, but due {_format_local(due)} falls in Week {week_number}."
+                        )
+                        issues.append(_issue("week_name_mismatch", "review", message, name, assignment_id))
+                        row_issues.append(f"name says Week {declared_week}; date is Week {week_number}")
 
             if start_date and day < start_date:
                 message = f"Due {_format_local(due)}, before the first class day on {start_date.isoformat()}."
@@ -237,6 +262,7 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
             "name": name,
             "assignment_group": group_names.get(str(assignment.get("assignment_group_id"))) or "",
             "published": assignment.get("published"),
+            "declared_week_number": declared_week,
             "week_number": week_number,
             "week_label": week_label,
             "weekday": due.strftime("%A") if due else "",
@@ -300,7 +326,7 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
     undated_count = len(rows) - dated_count
     instructional_weeks = max((item.week_number or 0 for item in semester_weeks), default=0)
     report = {
-        "schema_version": 3,
+        "schema_version": 4,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
