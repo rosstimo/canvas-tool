@@ -12,9 +12,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .semester import (
     day_to_dict,
     days_from_calendar,
-    render_day_table,
+    format_day,
+    render_week_table,
     semester_bounds,
     week_for_date,
+    week_to_dict,
     weeks_from_calendar,
 )
 
@@ -296,21 +298,23 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
 
     dated_count = sum(1 for row in rows if row.get("due_at"))
     undated_count = len(rows) - dated_count
+    instructional_weeks = max((item.week_number or 0 for item in semester_weeks), default=0)
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
         "read_only": True,
         "time_zone": time_zone_name,
         "calendar": None if calendar is None else {key: value for key, value in calendar.items() if key != "_path"},
+        "semester_weeks": [week_to_dict(item) for item in semester_weeks],
         "semester_days": [day_to_dict(item) for item in semester_days],
         "summary": {
             "assignments": len(rows),
             "dated": dated_count,
             "undated": undated_count,
             "issues": len(issues),
-            "instructional_weeks": max((item.week_number or 0 for item in semester_days), default=0),
+            "instructional_weeks": instructional_weeks,
             "due_weekdays": dict(weekdays),
             "due_times": dict(due_times),
             "common_due_time": common_time,
@@ -339,7 +343,10 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         lines.append(f"- Calendar: **{calendar.get('name', 'matched calendar')}**")
         if calendar.get("source_name"):
             lines.append(f"- Calendar source: {calendar['source_name']}")
-        lines.extend(["", "## Semester calendar", "", render_day_table(semester_days), ""])
+        if start_date and end_date:
+            lines.append(f"- First day of class: **{format_day(start_date)}**")
+            lines.append(f"- Last day of class: **{format_day(end_date)}**")
+        lines.extend(["", "## Semester week reference", "", render_week_table(semester_weeks), ""])
     else:
         lines.append("- Calendar: **none matched**. Week numbering and institutional break checks were skipped.")
 
@@ -380,7 +387,6 @@ def audit_dates(snapshot: Path, root: Path, calendar_path: Path | None = None) -
         ]) + " |")
 
     lines.extend(["", "## Patterns", "", f"- Assignments: **{len(rows)}** total; **{dated_count}** dated; **{undated_count}** without a due date."])
-    instructional_weeks = max((item.week_number or 0 for item in semester_days), default=0)
     if instructional_weeks:
         lines.append(f"- Numbered instructional weeks: **{instructional_weeks}**.")
     if weekdays:
