@@ -40,7 +40,17 @@ def _points(value: Any) -> str:
     return str(value)
 
 
-def _schedule_text(row: dict[str, Any] | None, field: str = "due_at") -> str:
+def _md(value: Any) -> str:
+    text = str(value if value is not None else "")
+    return text.replace("\n", " ").replace("\r", " ").replace("|", "\\|")
+
+
+def _schedule_text(
+    row: dict[str, Any] | None,
+    field: str = "due_at",
+    *,
+    have_calendar: bool = True,
+) -> str:
     if not row or not row.get(field):
         return "—"
     week_number = row.get("week_number")
@@ -50,7 +60,7 @@ def _schedule_text(row: dict[str, Any] | None, field: str = "due_at") -> str:
         parts.append(f"W{week_number}")
     elif week_label:
         parts.append(week_label)
-    else:
+    elif have_calendar:
         parts.append("OUTSIDE")
     if row.get("weekday"):
         parts.append(str(row["weekday"]))
@@ -58,7 +68,7 @@ def _schedule_text(row: dict[str, Any] | None, field: str = "due_at") -> str:
         parts.append(str(row["time_local"]))
     if row.get("date_local"):
         parts.append(str(row["date_local"]))
-    return " · ".join(parts)
+    return " · ".join(parts) or "—"
 
 
 def _completion_requirement(value: Any) -> str:
@@ -98,7 +108,8 @@ def _rubric_map(rubrics: list[dict[str, Any]]) -> dict[str, str]:
         for association in (rubric.get("associations") or []):
             if not isinstance(association, dict):
                 continue
-            if str(association.get("association_type") or "").casefold() != "assignment":
+            association_type = str(association.get("association_type") or association.get("type") or "").casefold()
+            if association_type != "assignment":
                 continue
             assignment_id = association.get("association_id")
             if assignment_id is not None:
@@ -108,10 +119,8 @@ def _rubric_map(rubrics: list[dict[str, Any]]) -> dict[str, str]:
 
 def _assignment_rubric(assignment: dict[str, Any], rubric_by_assignment: dict[str, str]) -> str:
     settings = assignment.get("rubric_settings")
-    if isinstance(settings, dict):
-        title = settings.get("title")
-        if title:
-            return str(title)
+    if isinstance(settings, dict) and settings.get("title"):
+        return str(settings["title"])
     assignment_id = assignment.get("id")
     if assignment_id is not None and str(assignment_id) in rubric_by_assignment:
         return rubric_by_assignment[str(assignment_id)]
@@ -191,6 +200,7 @@ def _assign_to_text(record: dict[str, Any] | None, section_names: dict[str, str]
 def build_overview(snapshot: Path) -> CourseOverviewResult:
     snapshot = snapshot.resolve()
     manifest = _load(snapshot / "manifest.json", {})
+    course = _load(snapshot / "course.json", {})
     modules = _load(snapshot / "modules.json", [])
     module_items = _load(snapshot / "module-items.json", [])
     module_overrides = _load(snapshot / "module-overrides.json", [])
@@ -203,6 +213,7 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
     sections = _load(snapshot / "sections.json", [])
     date_report = _load(snapshot / "date-audit.json", {})
     recon_errors = _load(snapshot / "errors.json", [])
+    have_calendar = bool(date_report.get("calendar"))
 
     assignments = {str(item.get("id")): item for item in assignments_list if isinstance(item, dict) and item.get("id") is not None}
     classic_quizzes = {str(item.get("id")): item for item in classic_list if isinstance(item, dict) and item.get("id") is not None}
@@ -236,15 +247,21 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
             if item.get("published") is False:
                 unpublished_item_count += 1
 
+            points = None
+            if assignment:
+                points = assignment.get("points_possible")
+            elif isinstance(item.get("content_details"), dict):
+                points = item["content_details"].get("points_possible")
+
             rendered_items.append({
                 "position": item.get("position"),
                 "title": str(item.get("title") or ""),
                 "type": str(item.get("type") or ""),
                 "published": item.get("published"),
                 "assignment_id": assignment_id,
-                "due": _schedule_text(date_rows.get(assignment_id or "")) if assignment else "—",
+                "due": _schedule_text(date_rows.get(assignment_id or ""), have_calendar=have_calendar) if assignment else "—",
                 "assignment_group": group_names.get(str(assignment.get("assignment_group_id"))) if assignment else "—",
-                "points": assignment.get("points_possible") if assignment else (item.get("content_details") or {}).get("points_possible") if isinstance(item.get("content_details"), dict) else None,
+                "points": points,
                 "rubric": _assignment_rubric(assignment, rubric_by_assignment) if assignment else "—",
                 "completion_requirement": _completion_requirement(item.get("completion_requirement")),
             })
@@ -268,7 +285,7 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
             "name": str(module.get("name") or ""),
             "published": module.get("published"),
             "assign_to": _assign_to_text(overrides_by_module.get(module_id), section_names),
-            "unlock": _schedule_text(module_date_rows.get(module_id), "unlock_at"),
+            "unlock": _schedule_text(module_date_rows.get(module_id), "unlock_at", have_calendar=have_calendar),
             "prerequisites": prerequisites,
             "require_sequential_progress": module.get("require_sequential_progress"),
             "completion_mode": completion_mode,
@@ -286,19 +303,35 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
             "name": str(assignment.get("name") or ""),
             "type": _graded_type(assignment),
             "published": assignment.get("published"),
-            "due": _schedule_text(date_rows.get(assignment_id)),
+            "due": _schedule_text(date_rows.get(assignment_id), have_calendar=have_calendar),
             "assignment_group": group_names.get(str(assignment.get("assignment_group_id"))) or "—",
             "points": assignment.get("points_possible"),
             "rubric": _assignment_rubric(assignment, rubric_by_assignment),
         })
 
+    group_counts: dict[str, int] = {}
+    for assignment in graded_items:
+        key = str(assignment.get("assignment_group_id") or "")
+        group_counts[key] = group_counts.get(key, 0) + 1
+    group_rows = [
+        {
+            "id": group.get("id"),
+            "position": group.get("position"),
+            "name": str(group.get("name") or ""),
+            "weight": group.get("group_weight"),
+            "graded_items": group_counts.get(str(group.get("id") or ""), 0),
+        }
+        for group in sorted((item for item in assignment_groups if isinstance(item, dict)), key=lambda item: (item.get("position") is None, item.get("position") or 0))
+    ]
+
     schedule_issues = list(date_report.get("issues") or [])
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
         "read_only": True,
+        "logic": "structured_fields_only",
         "summary": {
             "modules": len(module_rows),
             "module_items": sum(len(item["items"]) for item in module_rows),
@@ -307,7 +340,9 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
             "unpublished_module_items": unpublished_item_count,
             "schedule_issues": len(schedule_issues),
             "recon_errors": len(recon_errors),
+            "weighted_assignment_groups": bool(course.get("apply_assignment_group_weights")),
         },
+        "assignment_groups": group_rows,
         "schedule_issues": schedule_issues,
         "modules": module_rows,
         "graded_items_not_in_modules": unplaced,
@@ -333,6 +368,7 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
         f"- Graded items not represented in any module: **{len(unplaced)}**",
         f"- Unpublished module items: **{unpublished_item_count}**",
         f"- Structured schedule/availability flags: **{len(schedule_issues)}**",
+        f"- Weighted assignment groups: **{_yes_no(bool(course.get('apply_assignment_group_weights')))}**",
         f"- Recon retrieval errors: **{len(recon_errors)}**",
         "",
         "## Schedule / availability flags",
@@ -346,10 +382,21 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
     else:
         lines.append("None found.")
 
+    lines.extend([
+        "",
+        "## Assignment groups / grade categories",
+        "",
+        "| # | Group | Weight | Graded items |",
+        "|---:|---|---:|---:|",
+    ])
+    for group in group_rows:
+        weight = "—" if group.get("weight") is None else f"{_points(group.get('weight'))}%"
+        lines.append(f"| {group.get('position') or ''} | {_md(group['name'])} | {weight} | {group['graded_items']} |")
+
     lines.extend(["", "## Modules", ""])
     for module in module_rows:
         lines.extend([
-            f"### {module.get('position') or '?'}\. {module['name']}",
+            f"### {module.get('position') or '?'}. {module['name']}",
             "",
             f"- Published: **{_yes_no(module.get('published'))}**",
             f"- Assign to: **{module['assign_to']}**",
@@ -363,12 +410,12 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
             lines.extend(["_No items in this module._", ""])
             continue
         lines.extend([
-            "| # | Pub | Type | Item | Due | Grade group | Points | Rubric | Requirement |",
+            "| # | Pub | Type | Item | Due | Grade category/group | Points | Rubric | Requirement |",
             "|---:|---|---|---|---|---|---:|---|---|",
         ])
         for item in module["items"]:
             lines.append(
-                f"| {item.get('position') or ''} | {_yes_no(item.get('published'))} | {item['type']} | {item['title']} | {item['due']} | {item['assignment_group']} | {_points(item.get('points'))} | {item['rubric']} | {item['completion_requirement']} |"
+                f"| {item.get('position') or ''} | {_yes_no(item.get('published'))} | {_md(item['type'])} | {_md(item['title'])} | {_md(item['due'])} | {_md(item['assignment_group'])} | {_points(item.get('points'))} | {_md(item['rubric'])} | {_md(item['completion_requirement'])} |"
             )
         lines.append("")
 
@@ -379,11 +426,11 @@ def build_overview(snapshot: Path) -> CourseOverviewResult:
         lines.extend([
             "These objects are returned by Canvas's Assignments API but were not matched to any module item. This is an inventory observation, not an automatic error.",
             "",
-            "| Pub | Type | Item | Due | Grade group | Points | Rubric |",
+            "| Pub | Type | Item | Due | Grade category/group | Points | Rubric |",
             "|---|---|---|---|---|---:|---|",
         ])
         for item in unplaced:
-            lines.append(f"| {_yes_no(item.get('published'))} | {item['type']} | {item['name']} | {item['due']} | {item['assignment_group']} | {_points(item.get('points'))} | {item['rubric']} |")
+            lines.append(f"| {_yes_no(item.get('published'))} | {_md(item['type'])} | {_md(item['name'])} | {_md(item['due'])} | {_md(item['assignment_group'])} | {_points(item.get('points'))} | {_md(item['rubric'])} |")
 
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return CourseOverviewResult(
