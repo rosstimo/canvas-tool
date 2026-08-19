@@ -16,6 +16,30 @@ def strip_canvas_ids:
         .html_url,.url,.api_url,.created_at,.updated_at)
   else . end);
 
+# Recon passes files with jq --slurpfile so large course content never becomes
+# command-line arguments. Each input file contains one top-level JSON value.
+$course[0] as $course |
+$settings[0] as $settings |
+$tabs[0] as $tabs |
+$modules[0] as $modules |
+$module_items[0] as $module_items |
+$groups[0] as $groups |
+$assignments[0] as $assignments |
+$classic_quizzes[0] as $classic_quizzes |
+$classic_questions[0] as $classic_questions |
+$new_quizzes[0] as $new_quizzes |
+$new_items[0] as $new_items |
+$pages[0] as $pages |
+$rubrics[0] as $rubrics |
+$discussions[0] as $discussions |
+$announcements[0] as $announcements |
+$files[0] as $files |
+$folders[0] as $folders |
+$features[0] as $features |
+$grading_standards[0] as $grading_standards |
+$outcome_links[0] as $outcome_links |
+$calendar_events[0] as $calendar_events |
+
 ($groups | map({key:(.id|tostring),value:.name}) | from_entries) as $group_names |
 ($assignments | map({key:(.id|tostring),value:.name}) | from_entries) as $assignment_names |
 ($modules | map({key:(.id|tostring),value:.name}) | from_entries) as $module_names |
