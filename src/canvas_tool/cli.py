@@ -9,6 +9,7 @@ from typing import Any
 
 from . import __version__
 from .api import CanvasApiError, CanvasClient
+from .audit_suite import build_audit_suite
 from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
@@ -137,15 +138,24 @@ def command_overview(args: argparse.Namespace) -> int:
 
 def command_audit(args: argparse.Namespace) -> int:
     _config, client = client_from_config()
+    root = project_root()
     snapshot, calendar = _prepare_course_view(client, args.course, args.calendar)
-    result = audit_course(snapshot, project_root(), calendar)
-    print("Course audit")
-    print(f"  Schedule/availability flags:   {result.schedule_issue_count}")
-    print(f"  Graded items not in modules:   {result.unplaced_graded_item_count}")
-    print(f"  Recon retrieval errors:        {result.recon_error_count}")
+    compact = audit_course(snapshot, root, calendar)
+    duplicates = audit_snapshot(snapshot)
+    suite = build_audit_suite(snapshot)
+
+    print("Comprehensive course audit")
+    print(f"  Specialized reports:           {len(suite.report_paths)}")
+    print(f"  Warnings:                      {suite.warning_count}")
+    print(f"  Review items:                  {suite.review_count}")
+    print(f"  Findings/observations total:   {suite.finding_count}")
+    print(f"  Schedule/availability flags:   {compact.schedule_issue_count}")
+    print(f"  Graded items not in modules:   {compact.unplaced_graded_item_count}")
+    print(f"  Duplicate audit candidates:    {duplicates.high_confidence + duplicates.review + duplicates.similar_names}")
+    print(f"  Recon retrieval errors:        {compact.recon_error_count}")
     print("  Canvas changes:                none (read-only)")
-    print(f"  Report: {result.markdown_path}")
-    print(f"  JSON:   {result.json_path}")
+    print(f"  Comprehensive report:          {suite.comprehensive_path}")
+    print(f"  Report index:                  {snapshot / 'README.md'}")
     return 0
 
 
@@ -208,7 +218,7 @@ def parser() -> argparse.ArgumentParser:
     overview.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
     overview.set_defaults(func=command_overview)
 
-    audit = sub.add_parser("audit", help="run convention-free schedule and inventory checks (read-only)")
+    audit = sub.add_parser("audit", help="generate the comprehensive read-only course audit suite")
     audit.add_argument("course")
     audit.add_argument("--calendar", help="optional institutional calendar JSON; otherwise auto-match calendars/ by Canvas host and term")
     audit.set_defaults(func=command_audit)
