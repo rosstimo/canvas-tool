@@ -52,7 +52,7 @@ $calendar_events[0] as $calendar_events |
     grading_standard_present: ($course.grading_standard_id != null),
     course_format: $course.course_format
   },
-  settings: ($settings | with_entries(select(.key | endswith("_id") | not))),
+  settings: ($settings | with_entries(select((.key | endswith("_id") | not) and .key != "image"))),
   tabs: ($tabs | map({id,label,type,hidden,visibility,position}) | sort_by(.position,.label)),
   modules: ($module_items | map(
     ($module_meta[.source_id] // {}) as $m |
