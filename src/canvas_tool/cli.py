@@ -9,12 +9,13 @@ from typing import Any
 
 from . import __version__
 from .api import CanvasApiError, CanvasClient
-from .audit_suite import build_audit_suite
+from .assignment_overrides import capture_assignment_overrides
 from .compare import compare_snapshots
 from .config import ConfigError, load_config
 from .course import CourseTargetError, resolve_course
 from .course_audit import audit_course
 from .duplicates import audit_snapshot
+from .full_audit import build_full_audit
 from .module_overrides import capture_module_overrides
 from .overview import build_overview
 from .recon import Recon
@@ -116,6 +117,7 @@ def _prepare_course_view(client: CanvasClient, course: str, calendar_arg: str | 
     root = project_root()
     snapshot = Recon(client, root).run(course).path
     capture_module_overrides(client, snapshot)
+    capture_assignment_overrides(client, snapshot)
     calendar = Path(calendar_arg).expanduser().resolve() if calendar_arg else None
     audit_dates(snapshot, root, calendar)
     return snapshot, calendar
@@ -142,13 +144,14 @@ def command_audit(args: argparse.Namespace) -> int:
     snapshot, calendar = _prepare_course_view(client, args.course, args.calendar)
     compact = audit_course(snapshot, root, calendar)
     duplicates = audit_snapshot(snapshot)
-    suite = build_audit_suite(snapshot)
+    suite = build_full_audit(snapshot)
 
     print("Comprehensive course audit")
     print(f"  Specialized reports:           {len(suite.report_paths)}")
     print(f"  Warnings:                      {suite.warning_count}")
     print(f"  Review items:                  {suite.review_count}")
-    print(f"  Findings/observations total:   {suite.finding_count}")
+    print(f"  Observations:                  {suite.observation_count}")
+    print(f"  Findings total:                {suite.finding_count}")
     print(f"  Schedule/availability flags:   {compact.schedule_issue_count}")
     print(f"  Graded items not in modules:   {compact.unplaced_graded_item_count}")
     print(f"  Duplicate audit candidates:    {duplicates.high_confidence + duplicates.review + duplicates.similar_names}")
