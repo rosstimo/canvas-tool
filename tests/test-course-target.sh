@@ -22,10 +22,24 @@ canvas_resolve_course 'https://isu.instructure.com/courses/18637/modules'
 [[ "$CANVAS_COURSE_ID" == '18637' ]] || fail 'deep course URL'
 pass 'deep course URL'
 
+canvas_resolve_course 'isu.instructure.com/courses/18637'
+[[ "$CANVAS_COURSE_BASE_URL" == 'https://isu.instructure.com' ]] || fail 'scheme-less base URL'
+[[ "$CANVAS_COURSE_ID" == '18637' ]] || fail 'scheme-less course ID'
+pass 'scheme-less course URL'
+
+canvas_resolve_course 'isu.instructure.com/courses/18637/modules'
+[[ "$CANVAS_COURSE_ID" == '18637' ]] || fail 'deep scheme-less course URL'
+pass 'deep scheme-less course URL'
+
 if canvas_resolve_course 'https://example.com/courses/18637' >/dev/null 2>&1; then
     fail 'foreign origin accepted'
 fi
 pass 'foreign origin rejected'
+
+if canvas_resolve_course 'example.com/courses/18637' >/dev/null 2>&1; then
+    fail 'scheme-less foreign origin accepted'
+fi
+pass 'scheme-less foreign origin rejected'
 
 if canvas_resolve_course 'RCET2265' >/dev/null 2>&1; then
     fail 'invalid target accepted'
