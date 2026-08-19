@@ -65,17 +65,22 @@ class DateAuditTests(unittest.TestCase):
         calendars = root / "calendars"
         calendars.mkdir()
         self.write_json(calendars / "isu-fall-2026.json", {
-            "schema_version": 1,
+            "schema_version": 2,
             "name": "Idaho State University Fall 2026",
             "canvas_host": "isu.instructure.com",
             "term_name": "Fall 2026",
             "time_zone": "America/Denver",
-            "start_date": "2026-08-24",
-            "end_date": "2026-12-18",
-            "no_class_periods": [
+            "first_class_date": "2026-08-24",
+            "last_class_date": "2026-12-18",
+            "break_weeks": [
+                {"name": "Thanksgiving Break", "start": "2026-11-23", "end": "2026-11-27"}
+            ],
+            "holidays": [
                 {"name": "Labor Day holiday", "start": "2026-09-07", "end": "2026-09-07"}
             ],
-            "special_periods": [],
+            "special_periods": [
+                {"name": "Finals week", "start": "2026-12-14", "end": "2026-12-18"}
+            ],
         })
 
     def test_flags_calendar_collision_missing_date_and_bad_availability(self):
@@ -92,13 +97,21 @@ class DateAuditTests(unittest.TestCase):
             self.assertEqual(result.assignment_count, 3)
             self.assertEqual(result.dated_count, 2)
             self.assertEqual(result.undated_count, 1)
+            self.assertEqual(report["summary"]["instructional_weeks"], 16)
             self.assertIn("no_class_day", codes)
             self.assertIn("missing_due_date", codes)
             self.assertIn("unlock_after_due", codes)
             self.assertIn("has_overrides", codes)
-            self.assertTrue(result.markdown_path.exists())
+
+            labor_day = next(item for item in report["assignments"] if item["id"] == 10)
+            self.assertEqual(labor_day["week_number"], 3)
+            self.assertEqual(labor_day["weekday"], "Monday")
+            self.assertEqual(labor_day["date_local"], "September 7, 2026")
+
             text = result.markdown_path.read_text(encoding="utf-8")
+            self.assertIn("| Week | Day | Date | Notes |", text)
             self.assertIn("Labor Day holiday", text)
+            self.assertIn("Thanksgiving Break", text)
             self.assertIn("NO DUE DATE", text)
             self.assertIn("Module unlock dates", text)
 
