@@ -14,6 +14,7 @@ class SemesterWeek:
     week_number: int | None
     label: str
     kind: str
+    notes: tuple[str, ...] = ()
 
     def contains(self, day: date) -> bool:
         return self.calendar_start <= day <= self.calendar_end
@@ -56,6 +57,25 @@ def _period_names_for_day(periods: list[dict[str, Any]], day: date) -> list[str]
     return names
 
 
+def _period_names_for_week(periods: list[dict[str, Any]], start: date, end: date) -> list[str]:
+    names: list[str] = []
+    for period in periods:
+        period_start, period_end = _period_bounds(period)
+        if _overlaps(start, end, period_start, period_end):
+            names.append(str(period.get("name") or "Special date"))
+    return names
+
+
+def _sunday_on_or_before(day: date) -> date:
+    # date.weekday(): Monday=0 ... Sunday=6
+    return day - timedelta(days=(day.weekday() + 1) % 7)
+
+
+def _saturday_on_or_after(day: date) -> date:
+    # Saturday is weekday 5.
+    return day + timedelta(days=(5 - day.weekday()) % 7)
+
+
 def semester_bounds(calendar: dict[str, Any]) -> tuple[date, date]:
     first = calendar.get("first_class_date", calendar.get("start_date"))
     last = calendar.get("last_class_date", calendar.get("end_date"))
@@ -70,13 +90,17 @@ def build_semester_weeks(
     first_class_date: date,
     last_class_date: date,
     break_weeks: list[dict[str, Any]] | None = None,
+    holidays: list[dict[str, Any]] | None = None,
+    special_periods: list[dict[str, Any]] | None = None,
 ) -> list[SemesterWeek]:
     if last_class_date < first_class_date:
         raise ValueError("Last class date must be on or after first class date")
 
     breaks = list(break_weeks or [])
-    calendar_start = first_class_date - timedelta(days=first_class_date.weekday())
-    calendar_end = last_class_date + timedelta(days=(6 - last_class_date.weekday()))
+    holiday_periods = list(holidays or [])
+    specials = list(special_periods or [])
+    calendar_start = _sunday_on_or_before(first_class_date)
+    calendar_end = _saturday_on_or_after(last_class_date)
     cursor = calendar_start
     week_number = 0
     result: list[SemesterWeek] = []
@@ -86,11 +110,8 @@ def build_semester_weeks(
         active_start = max(cursor, first_class_date)
         active_end = min(week_end, last_class_date)
 
-        matching_breaks: list[str] = []
-        for period in breaks:
-            start, end = _period_bounds(period)
-            if _overlaps(cursor, week_end, start, end):
-                matching_breaks.append(str(period.get("name") or "Break"))
+        matching_breaks = _period_names_for_week(breaks, cursor, week_end)
+        notes = _period_names_for_week(holiday_periods + specials, cursor, week_end)
 
         if matching_breaks:
             label = " / ".join(dict.fromkeys(matching_breaks))
@@ -110,6 +131,7 @@ def build_semester_weeks(
             week_number=number,
             label=label,
             kind=kind,
+            notes=tuple(dict.fromkeys(notes)),
         ))
         cursor += timedelta(days=7)
 
@@ -118,7 +140,13 @@ def build_semester_weeks(
 
 def weeks_from_calendar(calendar: dict[str, Any]) -> list[SemesterWeek]:
     first, last = semester_bounds(calendar)
-    return build_semester_weeks(first, last, list(calendar.get("break_weeks") or []))
+    return build_semester_weeks(
+        first,
+        last,
+        break_weeks=list(calendar.get("break_weeks") or []),
+        holidays=list(calendar.get("holidays") or calendar.get("no_class_periods") or []),
+        special_periods=list(calendar.get("special_periods") or []),
+    )
 
 
 def week_for_date(weeks: list[SemesterWeek], day: date) -> SemesterWeek | None:
@@ -139,7 +167,13 @@ def build_semester_days(
     breaks = list(break_weeks or [])
     holiday_periods = list(holidays or [])
     specials = list(special_periods or [])
-    weeks = build_semester_weeks(first_class_date, last_class_date, breaks)
+    weeks = build_semester_weeks(
+        first_class_date,
+        last_class_date,
+        break_weeks=breaks,
+        holidays=holiday_periods,
+        special_periods=specials,
+    )
     result: list[SemesterDay] = []
 
     cursor = first_class_date
@@ -176,6 +210,44 @@ def days_from_calendar(calendar: dict[str, Any], weekdays_only: bool = True) -> 
     )
 
 
+def format_range(start: date, end: date) -> str:
+    if start.year != end.year:
+        return f"{start:%B} {start.day}, {start.year} - {end:%B} {end.day}, {end.year}"
+    if start.month != end.month:
+        return f"{start:%B} {start.day} - {end:%B} {end.day}, {end.year}"
+    return f"{start:%B} {start.day}-{end.day}, {end.year}"
+
+
+def format_day(day: date) -> str:
+    return f"{day:%A}, {day:%B} {day.day}, {day.year}"
+
+
+def render_week_table(weeks: list[SemesterWeek]) -> str:
+    lines = ["| Week | Date range (Sunday-Saturday) | Notes |", "|---:|---|---|"]
+    for week in weeks:
+        week_text = "" if week.week_number is None else str(week.week_number)
+        notes = list(week.notes)
+        if week.kind == "break":
+            notes.insert(0, week.label)
+        lines.append(
+            f"| {week_text} | {format_range(week.calendar_start, week.calendar_end)} | {'; '.join(dict.fromkeys(notes))} |"
+        )
+    return "\n".join(lines)
+
+
+def render_week_text(weeks: list[SemesterWeek]) -> str:
+    lines = [f"{'WEEK':<6}{'DATE RANGE (SUNDAY-SATURDAY)':<38}NOTES"]
+    for week in weeks:
+        week_text = "" if week.week_number is None else str(week.week_number)
+        notes = list(week.notes)
+        if week.kind == "break":
+            notes.insert(0, week.label)
+        lines.append(
+            f"{week_text:<6}{format_range(week.calendar_start, week.calendar_end):<38}{'; '.join(dict.fromkeys(notes))}"
+        )
+    return "\n".join(lines)
+
+
 def render_day_table(days: list[SemesterDay]) -> str:
     lines = ["| Week | Day | Date | Notes |", "|---:|---|---|---|"]
     for item in days:
@@ -205,6 +277,7 @@ def week_to_dict(week: SemesterWeek) -> dict[str, Any]:
         "calendar_end": week.calendar_end.isoformat(),
         "start": week.active_start.isoformat(),
         "end": week.active_end.isoformat(),
+        "notes": list(week.notes),
     }
 
 
