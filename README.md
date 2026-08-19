@@ -116,6 +116,7 @@ Specialized reports currently include:
 - `assignment-override-audit.md` - differentiated **Assign To** targets and override dates, with specific-student targets retained only as counts
 - `module-audit.md` - module structure, prerequisites, completion requirements, publication state, item types, and captured content-reference integrity
 - `quiz-audit.md` - Classic Quizzes, New Quizzes, quiz settings, question/item counts, question types, and bank-backed New Quiz entries
+- `question-audit.md` - question-level Classic/New Quiz and Classic Question Bank review, including duplicate question bodies/answers, basic answer-key sanity checks where the API structure is unambiguous, stimulus references, and question-type inventories
 - `question-bank-audit.md` - Classic Question Banks and questions, Classic Quiz question groups/bank links, and New Quiz bank-backed items referenced by captured quizzes
 - `grading-audit.md` - assignment-group weighting, rubrics, grading standards, learning outcomes, grading periods, and late policy
 - `content-audit.md` - pages, files, folders, discussions, announcements, calendar events, and lightweight HTML/accessibility-review signals
@@ -138,7 +139,7 @@ Findings are intentionally conservative:
 - **review** means the configuration deserves a look but may be intentional
 - **observation** is inventory information and is not treated as an error
 
-Examples of objective/review checks include dates outside the course or during configured breaks, invalid unlock/due/lock ordering, missing internal Canvas targets, empty question banks/quizzes/modules, inconsistent question counts, failed imports/exports, active migration issues, odd grade weighting, rubric associations, duplicate candidates, differentiated assignment targets, and lightweight HTML signals such as images without an `alt` attribute.
+Examples of objective/review checks include dates outside the course or during configured breaks, invalid unlock/due/lock ordering, missing internal Canvas targets, empty question banks/quizzes/modules, inconsistent question counts, failed imports/exports, active migration issues, odd grade weighting, rubric associations, duplicate candidates, differentiated assignment targets, question-level structural oddities, and lightweight HTML signals such as images without an `alt` attribute.
 
 External URLs are inventoried but are not fetched by the audit. New Quiz item-bank reporting covers banks referenced by the captured quiz items; it does not claim to enumerate every item bank available to an instructor/account.
 
@@ -229,7 +230,7 @@ Python tests use the standard library and require no real Canvas token:
 uv run python -m unittest discover -s tests_py -v
 ```
 
-The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, duplicate-audit classification/reporting, Sunday-Saturday semester week numbering, unnumbered break weeks, convention-free date auditing, FERPA-safe module and assignment override capture, course-overview joins, report indexing, New Quiz identification, question-bank audit generation, migration archaeology, stale internal-link detection, and the comprehensive audit rollup.
+The rewrite tests cover course target parsing and origin protection, secret sanitization, multi-megabyte course content normalization, stable normalization of volatile Canvas URLs, compact comparison generation, duplicate-audit classification/reporting, Sunday-Saturday semester week numbering, unnumbered break weeks, convention-free date auditing, FERPA-safe module and assignment override capture, course-overview joins, report indexing, New Quiz identification, question-bank and question-level audit generation, migration archaeology, stale internal-link detection, expanded recon privacy/scope, and the comprehensive audit rollup.
 
 The Bash prototype tests remain under `tests/` while parity is being checked.
 
