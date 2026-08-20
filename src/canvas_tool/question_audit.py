@@ -162,8 +162,9 @@ def audit_questions(snapshot: Path) -> QuestionAuditResult:
             elif entry_type in {"Bank", "BankEntry"} and entry.get("archived") is True:
                 findings.append(_finding("review", "New Quiz item bank", "Bank-backed item references an archived bank.", f"{source} → {title}"))
 
-            stimulus_id = item.get("stimulus_quiz_entry_id")
-            if stimulus_id is not None and str(stimulus_id) not in item_ids:
+            stimulus_raw = item.get("stimulus_quiz_entry_id")
+            stimulus_id = str(stimulus_raw).strip() if stimulus_raw is not None else ""
+            if stimulus_id and stimulus_id not in item_ids:
                 findings.append(_finding("warning", "New Quiz stimulus", f"References stimulus quiz entry ID {stimulus_id}, which is not present in the captured quiz items.", f"{source} → {title}"))
 
             if item.get("position") is not None:
@@ -178,7 +179,7 @@ def audit_questions(snapshot: Path) -> QuestionAuditResult:
                 "interaction_type": interaction_type or "—",
                 "points": item.get("points_possible"),
                 "status": item.get("status"),
-                "stimulus_quiz_entry_id": stimulus_id,
+                "stimulus_quiz_entry_id": stimulus_id or None,
                 "body_preview": _plain(body)[:160],
             })
 
