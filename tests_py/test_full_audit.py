@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from canvas_tool.full_audit import build_full_audit
+from canvas_tool.full_audit import _consolidate_findings, build_full_audit
 
 
 class FullAuditTests(unittest.TestCase):
@@ -71,6 +71,60 @@ class FullAuditTests(unittest.TestCase):
             self.assertIn("[Assignment Assign To and override audit](assignment-override-audit.md)", index)
             self.assertIn("[Quiz question audit](question-audit.md)", index)
             self.assertIn("[Link and internal-reference audit](link-audit.md)", index)
+
+    def test_master_consolidates_repeated_findings_and_historical_migration_warnings(self):
+        findings = [
+            {
+                "severity": "review",
+                "area": "due date",
+                "item": "Roll Call Attendance",
+                "message": "No due date is set.",
+                "source_report": "assignment-audit.md",
+            },
+            {
+                "severity": "review",
+                "area": "schedule / availability",
+                "item": "Roll Call Attendance",
+                "message": "No due date is set.",
+                "source_report": "date-audit.md",
+            },
+            {
+                "severity": "review",
+                "area": "page titles",
+                "item": "Welcome",
+                "message": "This exact page title appears 2 times.",
+                "source_report": "content-audit.md",
+            },
+            {
+                "severity": "warning",
+                "area": "content migration issue",
+                "item": "migration 42",
+                "message": "Missing links found in imported content.",
+                "source_report": "migration-audit.md",
+            },
+            {
+                "severity": "warning",
+                "area": "content migration issue",
+                "item": "migration 42",
+                "message": "Missing links found in imported content.",
+                "source_report": "migration-audit.md",
+            },
+        ]
+        duplicate_report = {
+            "high_confidence": [{"name": "Welcome"}],
+            "review": [],
+        }
+
+        result = _consolidate_findings(findings, duplicate_report)
+
+        self.assertEqual(len(result), 2)
+        roll_call = next(item for item in result if item["item"] == "Roll Call Attendance")
+        self.assertEqual(roll_call["occurrences"], 2)
+        self.assertEqual(set(roll_call["source_reports"]), {"assignment-audit.md", "date-audit.md"})
+
+        migration = next(item for item in result if item["item"] == "migration 42")
+        self.assertEqual(migration["severity"], "review")
+        self.assertEqual(migration["occurrences"], 2)
 
 
 if __name__ == "__main__":
