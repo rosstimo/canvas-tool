@@ -93,6 +93,60 @@ def _duplicate_findings(snapshot: Path) -> list[dict[str, str]]:
     return findings
 
 
+def _duplicate_names(report: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for key in ("high_confidence", "review"):
+        for item in report.get(key) or []:
+            if isinstance(item, dict) and item.get("name"):
+                names.add(str(item["name"]))
+    return names
+
+
+def _consolidate_findings(
+    findings: list[dict[str, Any]],
+    duplicate_report: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Reduce master-report noise without discarding detail from specialized reports."""
+    duplicate_names = _duplicate_names(duplicate_report)
+    consolidated: list[dict[str, Any]] = []
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for original in findings:
+        item = dict(original)
+        area = str(item.get("area") or "")
+        name = str(item.get("item") or "")
+
+        # The duplicate-content audit carries richer information than generic
+        # same-name findings from the module/page inventories.
+        if area in {"module names", "page titles"} and name in duplicate_names:
+            continue
+
+        # Migration issues describe historical import operations. They deserve
+        # review, but they are not proof that the current course is still broken.
+        if area in {"content migration", "content migration issue"} and str(item.get("severity")) == "warning":
+            item["severity"] = "review"
+
+        severity = str(item.get("severity") or "observation")
+        message = str(item.get("message") or "")
+        key = (severity, name, message)
+        source = str(item.get("source_report") or "")
+
+        existing = by_key.get(key)
+        if existing is not None:
+            existing["occurrences"] = int(existing.get("occurrences") or 1) + 1
+            sources = existing.setdefault("source_reports", [])
+            if source and source not in sources:
+                sources.append(source)
+            continue
+
+        item["occurrences"] = 1
+        item["source_reports"] = [source] if source else []
+        by_key[key] = item
+        consolidated.append(item)
+
+    return consolidated
+
+
 def _report_entry(path: Path, category: str) -> dict[str, str]:
     title = path.stem.replace("-", " ").title()
     try:
@@ -117,24 +171,25 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     suite_payload = _load(snapshot / "comprehensive-audit.json", {})
     findings: list[dict[str, Any]] = []
     for markdown_path in suite.report_paths:
-        payload = _load(markdown_path.with_suffix(".json"), {})
-        for item in payload.get("findings") or []:
+        report_payload = _load(markdown_path.with_suffix(".json"), {})
+        for item in report_payload.get("findings") or []:
             if isinstance(item, dict):
                 findings.append({**item, "source_report": markdown_path.name})
 
     for path in (override_result.json_path, question_result.json_path, link_result.json_path):
-        payload = _load(path, {})
+        report_payload = _load(path, {})
         source_report = path.with_suffix(".md").name
-        for item in payload.get("findings") or []:
+        for item in report_payload.get("findings") or []:
             if isinstance(item, dict):
                 findings.append({**item, "source_report": source_report})
 
     findings.extend(_date_findings(snapshot))
     findings.extend(_duplicate_findings(snapshot))
 
-    counts = Counter(str(item.get("severity") or "observation") for item in findings)
     date_report = _load(snapshot / "date-audit.json", {})
     duplicate_report = _load(snapshot / "duplicate-audit.json", {})
+    findings = _consolidate_findings(findings, duplicate_report)
+    counts = Counter(str(item.get("severity") or "observation") for item in findings)
     coverage = list(suite_payload.get("coverage") or [])
 
     reports: list[dict[str, str]] = []
@@ -176,7 +231,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     }
 
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "course_id": manifest.get("course_id"),
         "course_name": manifest.get("course_name"),
         "course_code": manifest.get("course_code"),
@@ -190,6 +245,8 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
             "Student rosters, enrollments, submissions, grades, quiz submissions, discussion entries, and other student-level records are intentionally excluded.",
             "Specific-student assignment and module overrides are retained only as counts; student identifiers are not stored.",
             "Unavailable API data is reported as unavailable rather than interpreted as an empty feature.",
+            "The master report consolidates identical findings and defers generic same-name findings to the richer duplicate-content audit; specialized reports retain their full detail.",
+            "Historical content-migration issues are review items in the master report because they do not by themselves prove that the current copied content is still broken.",
             "New Quiz item-bank coverage includes banks referenced by captured New Quiz items and does not claim to enumerate every item bank accessible to the instructor or account.",
             "External URLs are inventoried but are not fetched or network-validated by the link audit.",
             "HTML accessibility-review signals are structural cues only and do not replace an accessibility checker or human review.",
@@ -209,7 +266,7 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
         f"- Canvas course ID: `{manifest.get('course_id', '')}`",
         "- Mode: **read-only**. No Canvas content is changed.",
         "",
-        "This is the master course-health report. Warnings indicate objective structural/date conflicts, reviews identify things worth inspecting, and observations are inventory facts that may be completely intentional.",
+        "This is the master course-health report. Warnings indicate objective current structural/date conflicts, reviews identify things worth inspecting, and observations are inventory facts that may be completely intentional.",
         "",
         "## Audit summary",
         "",
@@ -235,11 +292,13 @@ def build_full_audit(snapshot: Path) -> FullAuditResult:
     if actionable:
         for item in actionable:
             label = f" **{_md(item.get('item'))}**:" if item.get("item") else ""
-            source = str(item.get("source_report") or "")
-            source_link = f" ([details]({source}))" if source.endswith(".md") else ""
+            sources = [str(value) for value in (item.get("source_reports") or []) if str(value).endswith(".md")]
+            source_link = f" ([details]({sources[0]}))" if sources else ""
+            occurrences = int(item.get("occurrences") or 1)
+            occurrence_note = f" _(reported {occurrences} times)_" if occurrences > 1 else ""
             lines.append(
                 f"- **{str(item.get('severity', 'review')).upper()} · {_md(item.get('area', 'review'))}**{label} "
-                f"{_md(item.get('message', ''))}{source_link}"
+                f"{_md(item.get('message', ''))}{occurrence_note}{source_link}"
             )
     else:
         lines.append("None found.")
