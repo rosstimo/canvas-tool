@@ -83,6 +83,40 @@ class QuestionAuditTests(unittest.TestCase):
             self.assertIn("missing-stimulus", text)
             self.assertIn("Legacy Bank", text)
 
+    def test_blank_stimulus_id_is_not_treated_as_missing_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot = Path(tmp)
+            self.write_json(snapshot, "manifest.json", {
+                "course_id": "123",
+                "course_name": "Blank Stimulus Test",
+                "course_code": "Q-123",
+            })
+            self.write_json(snapshot, "classic-quiz-questions.json", [])
+            self.write_json(snapshot, "question-bank-questions.json", [])
+            self.write_json(snapshot, "new-quiz-items.json", [{
+                "source_id": "100",
+                "title": "New Quiz",
+                "items": [{
+                    "id": "q1",
+                    "position": 1,
+                    "entry_type": "Item",
+                    "points_possible": 1,
+                    "stimulus_quiz_entry_id": "",
+                    "entry": {
+                        "title": "Standalone question",
+                        "item_body": "<p>Question body</p>",
+                        "interaction_type_slug": "choice",
+                    },
+                }],
+            }])
+
+            result = audit_questions(snapshot)
+            report = json.loads(result.json_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(result.warning_count, 0)
+            self.assertFalse(any(item.get("area") == "New Quiz stimulus" for item in report["findings"]))
+            self.assertIsNone(report["new_quiz_items"][0]["stimulus_quiz_entry_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
